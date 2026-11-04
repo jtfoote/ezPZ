@@ -195,7 +195,7 @@ public:
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(485);
+        left_w->setMinimumWidth(360);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &FrequencyResponseTab::applyPolyNumDen);

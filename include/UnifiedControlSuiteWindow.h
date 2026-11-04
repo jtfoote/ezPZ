@@ -10,7 +10,8 @@ class UnifiedControlSuiteWindow : public QMainWindow {
 public:
     SharedSystemModel model;
     QStackedWidget* stack;
-    std::vector<QPushButton*> tab_btns;
+    // std::vector<QPushButton*> tab_btns;
+    QComboBox* tab_combo = nullptr;
 
     RootLocusTab* rl_tab;
     PIDTimeResponseTab* pid_tab;
@@ -24,7 +25,7 @@ public:
 
     explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite (C++17 / Qt)");
-        resize(1460, 880);
+        resize(900, 600);
         setStyleSheet(QString("QMainWindow { background-color: %1; }").arg(Theme::BG_WINDOW));
 
         QSettings settings("ControlSuite", "ControlSystemsSuite");
@@ -59,13 +60,49 @@ public:
             "9. Routh-Hurwitz"
         };
 
-        for (size_t i = 0; i < tab_names.size(); ++i) {
-            auto* b = new QPushButton(tab_names[i]);
-            b->setCursor(Qt::PointingHandCursor);
-            connect(b, &QPushButton::clicked, this, [this, i]() { switchTab(static_cast<int>(i)); });
-            nav_l->addWidget(b);
-            tab_btns.push_back(b);
+        auto* ws_lbl = new QLabel("Workspace:");
+        ws_lbl->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 12px; border: none;").arg(Theme::TEXT_MUTED));
+        nav_l->addWidget(ws_lbl);
+
+        tab_combo = new QComboBox();
+        tab_combo->setCursor(Qt::PointingHandCursor);
+        tab_combo->setMinimumWidth(240);
+        for (const auto& name : tab_names) {
+            tab_combo->addItem(name);
         }
+        tab_combo->setStyleSheet(QString(
+            "QComboBox {"
+            "  background-color: %1; color: %2; border: 1px solid %3;"
+            "  border-radius: 5px; padding: 5px 12px; font-weight: bold; font-size: 12px;"
+            "}"
+            "QComboBox:hover { border: 1px solid %4; }"
+            "QComboBox::drop-down { border: none; width: 24px; }"
+            "QComboBox QAbstractItemView {"
+            "  background-color: %1; color: %2; selection-background-color: %4;"
+            "  selection-color: #ffffff; border: 1px solid %3; padding: 4px; outline: 0;"
+            "}"
+        ).arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY, Theme::BORDER_INPUT, Theme::BG_KEY_ACCENT));
+
+        connect(tab_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+            if (idx >= 0) switchTab(idx);
+        });
+        nav_l->addWidget(tab_combo);
+
+        // Optional: Quick Prev / Next tab buttons right next to the dropdown
+        auto* prev_tab_btn = makeActionBtn("◀", Theme::TEXT_PRIMARY, Theme::BG_INPUT);
+        auto* next_tab_btn = makeActionBtn("▶", Theme::TEXT_PRIMARY, Theme::BG_INPUT);
+        prev_tab_btn->setToolTip("Previous Workspace Tab");
+        next_tab_btn->setToolTip("Next Workspace Tab");
+        connect(prev_tab_btn, &QPushButton::clicked, this, [this, tab_names]() {
+            int next_i = (stack->currentIndex() - 1 + static_cast<int>(tab_names.size())) % static_cast<int>(tab_names.size());
+            switchTab(next_i);
+        });
+        connect(next_tab_btn, &QPushButton::clicked, this, [this, tab_names]() {
+            int next_i = (stack->currentIndex() + 1) % static_cast<int>(tab_names.size());
+            switchTab(next_i);
+        });
+        nav_l->addWidget(prev_tab_btn);
+        nav_l->addWidget(next_tab_btn);
 
         nav_l->addStretch();
 
@@ -148,6 +185,13 @@ public:
         if (settings.contains("win/geometry")) {
             restoreGeometry(settings.value("win/geometry").toByteArray());
         }
+        if (QScreen* screen = QGuiApplication::primaryScreen()) {
+            QRect avail = screen->availableGeometry();
+            if (width() > avail.width() || height() > avail.height()) {
+                resize(std::min(width(), avail.width()), std::min(height(), avail.height()));
+                move(avail.topLeft());
+            }
+        }
         int last_tab = std::clamp(settings.value("win/active_tab", 0).toInt(), 0, 8);
         switchTab(last_tab);
 
@@ -155,14 +199,11 @@ public:
     }
 
     void switchTab(int idx) {
+        if (idx < 0 || idx >= stack->count()) return;
         stack->setCurrentIndex(idx);
-        for (size_t i = 0; i < tab_btns.size(); ++i) {
-            bool act = (static_cast<int>(i) == idx);
-            tab_btns[i]->setStyleSheet(QString(
-                "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 5px 9px; font-weight: bold; font-size: 11px; }"
-            ).arg(act ? Theme::BG_KEY_ACCENT : Theme::BG_INPUT,
-                  act ? "#ffffff" : Theme::TEXT_SECONDARY,
-                  Theme::BORDER_INPUT));
+        if (tab_combo) {
+            QSignalBlocker blocker(tab_combo);
+            tab_combo->setCurrentIndex(idx);
         }
     }
 
