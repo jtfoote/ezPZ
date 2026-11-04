@@ -1,0 +1,688 @@
+#pragma once
+#include "DesignParametersDialog.h"
+
+
+class RootLocusTab : public QWidget {
+    Q_OBJECT
+public:
+    SharedSystemModel* model;
+    std::function<void(double)> onSendGainToPid;
+
+    QLineEdit *num_edit, *den_edit, *tp_v1_edit, *tp_v2_edit, *tol_edit;
+    QLabel *tp_lbl1, *tp_lbl2, *poly_status_lbl;
+    MathFormulaWidget* tf_math_w;
+    PoleZeroEditorCard *poles_card, *zeros_card;
+    QRadioButton *cart_radio, *polar_radio;
+    bool is_polar_mode = false;
+
+    QFrame* rl_banner;
+    QLabel *banner_title, *banner_right, *banner_sub;
+    QLabel *val_angle, *val_mag, *val_gain;
+    ComplexPlaneCanvas* canvas;
+    QCheckBox *chk_ts_spec, *chk_tp_spec, *chk_zeta_spec, *chk_live_k;
+    QLineEdit *edit_ts_spec, *edit_tp_spec, *edit_zeta_spec, *edit_live_k;
+    QSlider *slider_live_k;
+    QLabel *live_k_poles_lbl;
+
+    QLineEdit* edit_max_k;
+    MathFormulaWidget* rl_design_formula_w;
+    std::map<std::string, bool> rl_lock_map = {
+        {"kp", false}, {"kd", true}, {"ki", true}, {"os_pct", true},
+        {"zeta", false}, {"wn", false}, {"ts", false}, {"tp", false},
+        {"tr", false}, {"sigma_d", false}, {"omega_d", false}, {"ess", false}, {"rel_err_pct", false}
+    };
+    std::map<std::string, double> rl_input_map = {
+        {"kp", 1.5}, {"kd", 0.0}, {"ki", 0.0}, {"os_pct", 20.0},
+        {"zeta", 0.456}, {"wn", 5.48}, {"ts", 1.60}, {"tp", 0.64},
+        {"tr", 0.34}, {"sigma_d", 2.50}, {"omega_d", 4.88}, {"ess", 0.20}, {"rel_err_pct", 20.0}
+    };
+
+    double last_gain = 1.0;
+    bool updating_ui = false;
+    FeedbackConfigBar* fb_bar;
+
+    QComboBox *locus_param_combo, *vary_pole_combo;
+    QLineEdit *edit_fixed_k0;
+    QLabel *lbl_vary_pole, *lbl_fixed_k0, *gain_title_lbl;
+
+    RootLocusTab(SharedSystemModel* m, std::function<void(double)> send_cb, QWidget* parent = nullptr)
+        : QWidget(parent), model(m), onSendGainToPid(std::move(send_cb))
+    {
+        auto* root_layout = new QHBoxLayout(this);
+        root_layout->setContentsMargins(0, 0, 0, 0);
+        auto* splitter = new QSplitter(Qt::Horizontal, this);
+        root_layout->addWidget(splitter);
+
+        auto* left_w = new QWidget();
+        auto* left_v = new QVBoxLayout(left_w);
+        left_v->setContentsMargins(0, 0, 6, 0);
+        left_v->setSpacing(6);
+
+        // 1. Num(s) / Den(s) Polynomial Auto-Solver Card
+        auto* poly_card = makeCard();
+        auto* poly_l = new QVBoxLayout(poly_card);
+        poly_l->setContentsMargins(10, 8, 10, 8);
+        auto* poly_hdr = new QHBoxLayout();
+        auto* title_l = new QLabel("Transfer Function  G(s) = Num(s) / Den(s)");
+        title_l->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_ZERO));
+        auto* solve_btn = makeActionBtn("Solve Zeros & Poles ➔", Theme::ACCENT_PID);
+        poly_hdr->addWidget(title_l); poly_hdr->addStretch(); poly_hdr->addWidget(solve_btn);
+        poly_l->addLayout(poly_hdr);
+
+        auto* pgrid = new QGridLayout();
+        auto* nl = new QLabel("Num(s):"); nl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border: none;").arg(Theme::ACCENT_ZERO));
+        num_edit = makeDarkEntry(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+        auto* dl = new QLabel("Den(s):"); dl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border: none;").arg(Theme::ACCENT_POLE));
+        den_edit = makeDarkEntry(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
+        pgrid->addWidget(nl, 0, 0); pgrid->addWidget(num_edit, 0, 1);
+        pgrid->addWidget(dl, 0, 2); pgrid->addWidget(den_edit, 0, 3);
+        poly_l->addLayout(pgrid);
+
+        poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
+        poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
+        poly_l->addWidget(poly_status_lbl);
+
+        fb_bar = new FeedbackConfigBar("s", "H");
+        poly_l->addWidget(fb_bar);
+        fb_bar->onChanged = [this]() { fb_bar->syncToModelS(model); evaluateCurrent(true); };
+
+        tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
+        poly_l->addWidget(tf_math_w);
+        left_v->addWidget(poly_card);
+
+        // 2. Editable Poles (×) & Zeros (○) Tables Row
+        auto* pz_row = new QHBoxLayout();
+        poles_card = new PoleZeroEditorCard("Poles (×)", Theme::ACCENT_POLE, -1.0);
+        zeros_card = new PoleZeroEditorCard("Zeros (○)", Theme::ACCENT_ZERO, -3.0);
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        left_v->addLayout(pz_row);
+
+        // 3. Test Point s & Cartesian / Polar Switcher Card
+        auto* tp_card = makeCard();
+        auto* tp_l = new QVBoxLayout(tp_card);
+        tp_l->setContentsMargins(10, 8, 10, 8);
+        auto* tp_hdr = new QHBoxLayout();
+        auto* tp_title = new QLabel("Test Point  s  &  Angle Tolerance");
+        tp_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_PID));
+        cart_radio  = new QRadioButton("Cartesian"); cart_radio->setChecked(true);
+        polar_radio = new QRadioButton("Polar");
+        for (auto* rb : {cart_radio, polar_radio}) {
+            rb->setStyleSheet(QString("QRadioButton { color: %1; font-weight: bold; font-size: 11px; border: none; }").arg(Theme::TEXT_PRIMARY));
+        }
+        tp_hdr->addWidget(tp_title); tp_hdr->addStretch(); tp_hdr->addWidget(cart_radio); tp_hdr->addWidget(polar_radio);
+        tp_l->addLayout(tp_hdr);
+
+        auto* tp_grid = new QGridLayout();
+        tp_lbl1 = new QLabel("Real (σ)"); tp_lbl1->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        tp_lbl2 = new QLabel("Imag (jω)"); tp_lbl2->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        auto* l_tl = new QLabel("Tol (±°)"); l_tl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        tp_v1_edit = makeDarkEntry(QString::number(model->test_point.real()));
+        tp_v2_edit = makeDarkEntry(QString::number(model->test_point.imag()));
+        tol_edit   = makeDarkEntry(QString::number(model->rl_tol_deg), 60);
+        tp_grid->addWidget(tp_lbl1, 0, 0); tp_grid->addWidget(tp_v1_edit, 1, 0);
+        tp_grid->addWidget(tp_lbl2, 0, 1); tp_grid->addWidget(tp_v2_edit, 1, 1);
+        tp_grid->addWidget(l_tl,    0, 2); tp_grid->addWidget(tol_edit,   1, 2);
+        tp_l->addLayout(tp_grid);
+        left_v->addWidget(tp_card);
+
+        // 3B. s-Plane Design Specs (Ts, Tp, zeta) & Live Gain K Pole Explorer Card
+        auto* spec_card = makeCard();
+        auto* spec_l = new QVBoxLayout(spec_card);
+        spec_l->setContentsMargins(10, 6, 10, 6);
+        spec_l->setSpacing(4);
+
+        auto* spec_title = new QLabel("s-Plane Spec Lines (Ts, Tp, ζ) & Live Gain K Explorer");
+        spec_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_ASYMP));
+        spec_l->addWidget(spec_title);
+
+        auto* sp_grid = new QGridLayout();
+        chk_ts_spec   = new QCheckBox("Ts (s):");   
+        chk_ts_spec->setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 10px;");
+        edit_ts_spec  = makeDarkEntry("2.0", 48);
+        chk_tp_spec   = new QCheckBox("Tp (s):");   
+        chk_tp_spec->setStyleSheet("color: #f472b6; font-weight: bold; font-size: 10px;");
+        edit_tp_spec  = makeDarkEntry("1.0", 48);
+        chk_zeta_spec = new QCheckBox("ζ Ray:");    
+        chk_zeta_spec->setStyleSheet("color: #facc15; font-weight: bold; font-size: 10px;");
+        edit_zeta_spec = makeDarkEntry("0.707", 48);
+
+        sp_grid->addWidget(chk_ts_spec,   0, 0); sp_grid->addWidget(edit_ts_spec,   0, 1);
+        sp_grid->addWidget(chk_tp_spec,   0, 2); sp_grid->addWidget(edit_tp_spec,   0, 3);
+        sp_grid->addWidget(chk_zeta_spec, 0, 4); sp_grid->addWidget(edit_zeta_spec, 0, 5);
+        spec_l->addLayout(sp_grid);
+
+        auto* mode_row = new QHBoxLayout();
+        auto* mode_lbl = new QLabel("Sweep Parameter:");
+        mode_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        locus_param_combo = new QComboBox();
+        locus_param_combo->addItems({
+            "Vary Loop Gain K  (Standard Root Locus)",
+            "Vary Pole Location s = -a  (Fixed Gain K₀)"
+        });
+        locus_param_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 2px 4px; font-weight: bold; font-size: 10px;")
+                                         .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
+
+        lbl_vary_pole = new QLabel("Pole:");
+        lbl_vary_pole->setStyleSheet("color: #f472b6; font-size: 10px; font-weight: bold; border:none;");
+        vary_pole_combo = new QComboBox();
+        vary_pole_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 2px 4px; font-family: Monospace; font-size: 10px;")
+                                       .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
+
+        lbl_fixed_k0 = new QLabel("Fixed K₀:");
+        lbl_fixed_k0->setStyleSheet("color: #38bdf8; font-size: 10px; font-weight: bold; border:none;");
+        edit_fixed_k0 = makeDarkEntry("10.0", 48);
+
+        lbl_vary_pole->setVisible(false);
+        vary_pole_combo->setVisible(false);
+        lbl_fixed_k0->setVisible(false);
+        edit_fixed_k0->setVisible(false);
+
+        mode_row->addWidget(mode_lbl);
+        mode_row->addWidget(locus_param_combo, 1);
+        mode_row->addWidget(lbl_vary_pole);
+        mode_row->addWidget(vary_pole_combo);
+        mode_row->addWidget(lbl_fixed_k0);
+        mode_row->addWidget(edit_fixed_k0);
+        spec_l->addLayout(mode_row);
+
+        auto* k_row = new QHBoxLayout();
+        chk_live_k = new QCheckBox("Vary Gain K (■ CL Poles):");
+        chk_live_k->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 10px;").arg(Theme::ACCENT_PID));
+        edit_live_k = makeDarkEntry("1.0", 50);
+        slider_live_k = new QSlider(Qt::Horizontal);
+        slider_live_k->setRange(0, 1000);
+        slider_live_k->setValue(100);
+        auto* max_k_lbl = new QLabel("Max K:");
+        max_k_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        edit_max_k = makeDarkEntry(QString::number(model->max_k_slider, 'g', 4), 48);
+
+        k_row->addWidget(chk_live_k);
+        k_row->addWidget(edit_live_k);
+        k_row->addWidget(slider_live_k, 1);
+        k_row->addWidget(max_k_lbl);
+        k_row->addWidget(edit_max_k);
+        spec_l->addLayout(k_row);
+
+        auto* d_row = new QHBoxLayout();
+        auto* rl_design_btn = makeActionBtn("Design Controller ➔", "#0b0e14", Theme::ACCENT_PID);
+        auto* rl_params_btn = makeActionBtn("🎛 Design Parameters...", Theme::ACCENT_ZERO);
+        d_row->addWidget(rl_design_btn);
+        d_row->addWidget(rl_params_btn);
+        d_row->addStretch();
+        spec_l->addLayout(d_row);
+
+        rl_design_formula_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 9);
+        rl_design_formula_w->setVisible(false);
+        spec_l->addWidget(rl_design_formula_w);
+
+        live_k_poles_lbl = new QLabel("Enable Ts, Tp, ζ to view RL intersections (K, ωn) or click Design Parameters.");
+        live_k_poles_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-size: 10px; border: none;");
+        live_k_poles_lbl->setWordWrap(true);
+        spec_l->addWidget(live_k_poles_lbl);
+
+        left_v->addWidget(spec_card);
+
+        // 4. Evaluation Results Card (Turns Orange when OFF Root Locus!)
+        auto* res_card = makeCard();
+        auto* res_l = new QVBoxLayout(res_card);
+        res_l->setContentsMargins(10, 8, 10, 8);
+        auto* res_hdr = new QHBoxLayout();
+        auto* res_title = new QLabel("Evaluation Results");
+        res_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::TEXT_PRIMARY));
+        auto* send_btn = makeActionBtn("Send Gain K → PID Simulator ➔", Theme::ACCENT_PID);
+        res_hdr->addWidget(res_title); res_hdr->addStretch(); res_hdr->addWidget(send_btn);
+        res_l->addLayout(res_hdr);
+
+        rl_banner = new QFrame();
+        rl_banner->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        auto* b_l = new QVBoxLayout(rl_banner);
+        b_l->setContentsMargins(10, 6, 10, 6);
+        b_l->setSpacing(2);
+        auto* b_top = new QHBoxLayout();
+        banner_title = new QLabel("✔ ON ROOT LOCUS");
+        banner_right = new QLabel("Δθ = 0.00°");
+        b_top->addWidget(banner_title); b_top->addStretch(); b_top->addWidget(banner_right);
+        banner_sub = new QLabel("Satisfies ∠G(s) = ±180°(2k+1)");
+        banner_sub->setWordWrap(true);
+        banner_sub->setStyleSheet(QString("color: %1; font-size: 10px; font-weight: bold; border:none;").arg(Theme::BANNER_OK_FG));
+        b_l->addLayout(b_top);
+        b_l->addWidget(banner_sub);
+        res_l->addWidget(rl_banner);
+
+        auto* m_grid = new QHBoxLayout();
+        auto makeMetric = [&](const QString& lbl, QLabel*& out_lbl) {
+            auto* box = makeCard();
+            box->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 4px; padding: 5px;").arg(Theme::BG_INPUT, Theme::BORDER_INPUT));
+            auto* vl = new QVBoxLayout(box);
+            vl->setContentsMargins(6, 4, 6, 4);
+            auto* t = new QLabel(lbl); t->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
+            out_lbl = new QLabel("—"); out_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            vl->addWidget(t); vl->addWidget(out_lbl);
+            m_grid->addWidget(box);
+        };
+        makeMetric("NET ANGLE (deg)", val_angle);
+        makeMetric("MAGNITUDE |G(s)|", val_mag);
+        makeMetric("GAIN K = 1/|G(s)|", val_gain);
+        res_l->addLayout(m_grid);
+        left_v->addWidget(res_card);
+        left_v->addStretch();
+
+        // Right Plot Canvas
+        auto* right_card = makeCard();
+        auto* right_l = new QVBoxLayout(right_card);
+        auto* plot_hdr = new QHBoxLayout();
+        auto* plot_title = new QLabel("Complex s-Plane Root Locus Diagram");
+        plot_title->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none;").arg(Theme::TEXT_PRIMARY));
+        auto* chk_rl  = new QCheckBox("Root Locus");   chk_rl->setChecked(true);  chk_rl->setStyleSheet("color: #a855f7; font-weight: bold;");
+        auto* chk_as  = new QCheckBox("Asymptotes");   chk_as->setChecked(true);  chk_as->setStyleSheet("color: #22d3ee; font-weight: bold;");
+        auto* chk_brk = new QCheckBox("Breakaway");    chk_brk->setChecked(true); chk_brk->setStyleSheet("color: #fb923c; font-weight: bold;");
+        auto* chk_jw  = new QCheckBox("jω Crossings"); chk_jw->setChecked(true);  chk_jw->setStyleSheet("color: #38bdf8; font-weight: bold;");
+        auto* chk_dep = new QCheckBox("Dep/Arr ∠");    chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
+        auto* fit_btn = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        plot_hdr->addWidget(plot_title); plot_hdr->addStretch();
+        plot_hdr->addWidget(chk_rl); plot_hdr->addWidget(chk_as);
+        plot_hdr->addWidget(chk_brk); plot_hdr->addWidget(chk_jw);
+        plot_hdr->addWidget(fit_btn);
+        right_l->addLayout(plot_hdr);
+
+        canvas = new ComplexPlaneCanvas(false);
+        attachSvgExportMenu(canvas, "s_plane_root_locus.svg");
+        right_l->addWidget(canvas, 1);
+
+        splitter->addWidget(left_w);
+        splitter->addWidget(right_card);
+        splitter->setStretchFactor(0, 0);
+        splitter->setStretchFactor(1, 1);
+        left_w->setMinimumWidth(465);
+
+        // Connections
+        connect(solve_btn, &QPushButton::clicked, this, &RootLocusTab::applyPolyNumDen);
+        connect(num_edit, &QLineEdit::returnPressed, this, &RootLocusTab::applyPolyNumDen);
+        connect(den_edit, &QLineEdit::returnPressed, this, &RootLocusTab::applyPolyNumDen);
+
+        poles_card->onValuesChanged = [this]() {
+            if (updating_ui) return;
+            model->poles = poles_card->getValues();
+            den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
+            evaluateCurrent(true);
+            refreshVaryPoleCombo();
+        };
+        zeros_card->onValuesChanged = [this]() {
+            if (updating_ui) return;
+            model->zeros = zeros_card->getValues();
+            num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+            evaluateCurrent(true);
+        };
+
+        connect(cart_radio, &QRadioButton::toggled, this, [this](bool checked) {
+            if (updating_ui) return;
+            onCoordModeSwitch(!checked);
+        });
+
+        auto evalFn = [this]() { if (!updating_ui) evaluateCurrent(true); };
+        connect(tp_v1_edit, &QLineEdit::textEdited, this, evalFn);
+        connect(tp_v2_edit, &QLineEdit::textEdited, this, evalFn);
+        connect(tol_edit,   &QLineEdit::textEdited, this, evalFn);
+        connect(chk_rl, &QCheckBox::toggled, this, [this](bool v) { canvas->show_locus = v; canvas->update(); });
+        connect(chk_as, &QCheckBox::toggled, this, [this](bool v) { canvas->show_asymp = v; canvas->update(); });
+        connect(fit_btn, &QPushButton::clicked, this, [this]() { canvas->resetView(); });
+        connect(chk_brk, &QCheckBox::toggled, this, [this](bool v) { canvas->show_breakaway = v; canvas->update(); });
+        connect(chk_jw,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_jw_crossings = v; canvas->update(); });
+        connect(chk_dep, &QCheckBox::toggled, this, [this](bool v) { canvas->show_dep_arr_angles = v; canvas->update(); });
+        connect(send_btn, &QPushButton::clicked, this, [this]() {
+            if (!std::isfinite(last_gain) || last_gain < 0.0) return;
+
+            bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 && !model->poles.empty());
+            if (is_pole_sweep) {
+                int vary_idx = vary_pole_combo
+                    ? std::clamp(vary_pole_combo->currentIndex(), 0, static_cast<int>(model->poles.size()) - 1)
+                    : 0;
+                double fixed_k0 = edit_fixed_k0
+                    ? std::max(0.0, parseNumericInput(edit_fixed_k0->text().toStdString(), 10.0))
+                    : 10.0;
+
+                // Update the selected open-loop pole to s = -a (where a = last_gain)
+                model->poles[vary_idx] = Complex(-last_gain, 0.0);
+                model->plant_gain = fixed_k0;
+
+                // Refresh UI widgets in RootLocusTab to reflect the updated pole
+                updating_ui = true;
+                poles_card->setValues(model->poles);
+                den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
+                refreshVaryPoleCombo();
+                updating_ui = false;
+
+                // Send fixed_k0 to PID Simulator and sync tabs
+                if (onSendGainToPid) onSendGainToPid(fixed_k0);
+            } else {
+                if (onSendGainToPid) onSendGainToPid(last_gain);
+            }
+        });
+
+        canvas->onPointSelected = [this](Complex pt) {
+            updating_ui = true;
+            if (!is_polar_mode) {
+                tp_v1_edit->setText(QString::number(pt.real(), 'g', 4));
+                tp_v2_edit->setText(QString::number(pt.imag(), 'g', 4));
+            } else {
+                tp_v1_edit->setText(QString::number(std::abs(pt), 'g', 4));
+                tp_v2_edit->setText(QString::number(std::arg(pt) * 180.0 / PI, 'g', 4));
+            }
+            updating_ui = false;
+            evaluateCurrent(true);
+        };
+
+        auto updateSpecsAndK = [this]() {
+            if (updating_ui) return;
+            evaluateCurrent(false);
+        };
+        connect(chk_ts_spec,   &QCheckBox::toggled, this, updateSpecsAndK);
+        connect(chk_tp_spec,   &QCheckBox::toggled, this, updateSpecsAndK);
+        connect(chk_zeta_spec, &QCheckBox::toggled, this, updateSpecsAndK);
+        connect(chk_live_k,    &QCheckBox::toggled, this, updateSpecsAndK);
+
+        connect(edit_ts_spec,   &QLineEdit::textEdited, this, updateSpecsAndK);
+        connect(edit_tp_spec,   &QLineEdit::textEdited, this, updateSpecsAndK);
+        connect(edit_zeta_spec, &QLineEdit::textEdited, this, updateSpecsAndK);
+
+        connect(edit_max_k, &QLineEdit::editingFinished, this, [this]() {
+            model->max_k_slider = std::max(1.0, parseNumericInput(edit_max_k->text().toStdString(), 100.0));
+            evaluateCurrent(false);
+        });
+
+        connect(slider_live_k, &QSlider::valueChanged, this, [this](int val) {
+            if (updating_ui) return;
+            updating_ui = true;
+            double max_k = std::max(1.0, parseNumericInput(edit_max_k->text().toStdString(), model->max_k_slider));
+            model->max_k_slider = max_k;
+            double norm = val / 1000.0;
+            double k_v = max_k * norm * norm;
+            edit_live_k->setText(QString::fromStdString(PRECISION.fmt(k_v)));
+            chk_live_k->setChecked(true);
+            updating_ui = false;
+            evaluateCurrent(false);
+        });
+
+        connect(edit_live_k, &QLineEdit::editingFinished, this, [this]() {
+            if (updating_ui) return;
+            double max_k = std::max(1.0, parseNumericInput(edit_max_k->text().toStdString(), model->max_k_slider));
+            double k_v = std::max(0.0, parseNumericInput(edit_live_k->text().toStdString(), 1.0));
+            if (k_v > max_k) {
+                max_k = k_v * 1.25;
+                model->max_k_slider = max_k;
+                edit_max_k->setText(QString::number(max_k, 'g', 5));
+            }
+            updating_ui = true;
+            int sl_v = static_cast<int>(std::round(std::sqrt(std::min(k_v, max_k) / max_k) * 1000.0));
+            slider_live_k->setValue(sl_v);
+            chk_live_k->setChecked(true);
+            updating_ui = false;
+            evaluateCurrent(false);
+        });
+
+        connect(locus_param_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+            if (updating_ui) return;
+            bool pole_mode = (idx == 1);
+            lbl_vary_pole->setVisible(pole_mode);
+            vary_pole_combo->setVisible(pole_mode);
+            lbl_fixed_k0->setVisible(pole_mode);
+            edit_fixed_k0->setVisible(pole_mode);
+            chk_live_k->setText(pole_mode ? "Vary Pole a (■ CL Poles):" : "Vary Gain K (■ CL Poles):");
+            if (gain_title_lbl) gain_title_lbl->setText(pole_mode ? "POLE PARAM a (s = -a)" : "REQUIRED GAIN K");
+            refreshVaryPoleCombo();
+            evaluateCurrent(false);
+        });
+
+        connect(vary_pole_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+            if (!updating_ui) evaluateCurrent(false);
+        });
+
+        connect(edit_fixed_k0, &QLineEdit::editingFinished, this, [this]() {
+            if (!updating_ui) evaluateCurrent(false);
+        });
+
+        auto applyRlDesign = [this](const ConstraintMatrixAnalysis& ans) {
+            rl_design_formula_w->setVisible(true);
+            rl_design_formula_w->setLatex(QString::fromStdString(ans.formulas_latex));
+            model->pid_enabled = true;
+            model->kp = ans.solved.at("kp");
+            model->ki = ans.solved.at("ki");
+            model->kd = ans.solved.at("kd");
+            // Overlay designed specs on the s-plane canvas
+            edit_zeta_spec->setText(QString::fromStdString(PRECISION.fmt(ans.solved.at("zeta"))));
+            chk_zeta_spec->setChecked(true);
+            if (std::isfinite(ans.solved.at("ts"))) {
+                edit_ts_spec->setText(QString::fromStdString(PRECISION.fmt(ans.solved.at("ts"))));
+                chk_ts_spec->setChecked(true);
+            }
+            if (std::isfinite(ans.solved.at("tp"))) {
+                edit_tp_spec->setText(QString::fromStdString(PRECISION.fmt(ans.solved.at("tp"))));
+                chk_tp_spec->setChecked(true);
+            }
+            edit_live_k->setText(QString::fromStdString(PRECISION.fmt(model->kp)));
+            chk_live_k->setChecked(true);
+            evaluateCurrent(true);
+        };
+
+        connect(rl_design_btn, &QPushButton::clicked, this, [this, applyRlDesign]() {
+            rl_input_map["kp"] = model->kp;
+            rl_input_map["kd"] = model->kd;
+            rl_input_map["ki"] = model->ki;
+            auto ans = ParameterMatrixEngine::evaluate(rl_lock_map, rl_input_map, model);
+            applyRlDesign(ans);
+        });
+
+        connect(rl_params_btn, &QPushButton::clicked, this, [this, applyRlDesign]() {
+            rl_input_map["kp"] = model->kp;
+            rl_input_map["kd"] = model->kd;
+            rl_input_map["ki"] = model->ki;
+            auto* dlg = new DesignParametersDialog(
+                model, &rl_lock_map, &rl_input_map, applyRlDesign,
+                [this](double new_max_k) {
+                    edit_max_k->setText(QString::number(new_max_k, 'g', 5));
+                },
+                this
+            );
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->show();
+        });
+
+        loadFromModel();
+    }
+
+    void onCoordModeSwitch(bool to_polar) {
+        if (to_polar == is_polar_mode) return;
+        double v1 = parseNumericInput(tp_v1_edit->text().toStdString(), 0.0);
+        double v2 = parseNumericInput(tp_v2_edit->text().toStdString(), 0.0);
+        updating_ui = true;
+        if (to_polar) {
+            Complex s(v1, v2);
+            tp_lbl1->setText("Magnitude |s|");
+            tp_lbl2->setText("Angle (deg)");
+            tp_v1_edit->setText(QString::number(std::abs(s), 'g', 5));
+            tp_v2_edit->setText(QString::number(std::arg(s) * 180.0 / PI, 'g', 5));
+        } else {
+            Complex s = std::polar(v1, v2 * PI / 180.0);
+            tp_lbl1->setText("Real (σ)");
+            tp_lbl2->setText("Imag (jω)");
+            tp_v1_edit->setText(QString::number(s.real(), 'g', 5));
+            tp_v2_edit->setText(QString::number(s.imag(), 'g', 5));
+        }
+        is_polar_mode = to_polar;
+        updating_ui = false;
+        evaluateCurrent(true);
+    }
+
+    void refreshVaryPoleCombo() {
+        if (!vary_pole_combo) return;
+        bool prev = updating_ui;
+        updating_ui = true;
+        int prev_idx = std::max(0, vary_pole_combo->currentIndex());
+        vary_pole_combo->clear();
+        for (size_t i = 0; i < model->poles.size(); ++i) {
+            vary_pole_combo->addItem(QString("p%1 = %2")
+                .arg(i + 1)
+                .arg(QString::fromStdString(PRECISION.fmtComplex(model->poles[i]))));
+        }
+        if (vary_pole_combo->count() > 0) {
+            vary_pole_combo->setCurrentIndex(std::min(prev_idx, vary_pole_combo->count() - 1));
+        }
+        updating_ui = prev;
+    }
+
+    void applyPolyNumDen() {
+        try {
+            auto p_num = parsePolynomialInput(num_edit->text().toStdString());
+            auto p_den = parsePolynomialInput(den_edit->text().toStdString());
+            model->zeros = p_num.roots;
+            model->poles = p_den.roots;
+            double ratio = p_num.leading_gain / std::max(std::abs(p_den.leading_gain), 1e-12);
+            if (std::abs(ratio) > 1e-12) model->plant_gain = ratio;
+            poles_card->setValues(model->poles);
+            zeros_card->setValues(model->zeros);
+            poly_status_lbl->setText(QString("✔ Auto-filled %1 Poles & %2 Zeros (K = %3)")
+                                     .arg(model->poles.size()).arg(model->zeros.size()).arg(model->plant_gain));
+            evaluateCurrent(true);
+            refreshVaryPoleCombo();
+        } catch (const std::exception& e) {
+            poly_status_lbl->setText(QString("⚠ Polynomial error: %1").arg(e.what()));
+        }
+    }
+
+    void loadFromModel() {
+        updating_ui = true;
+        poles_card->setValues(model->poles);
+        zeros_card->setValues(model->zeros);
+        num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+        den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
+        if (!is_polar_mode) {
+            tp_v1_edit->setText(QString::number(model->test_point.real(), 'g', 4));
+            tp_v2_edit->setText(QString::number(model->test_point.imag(), 'g', 4));
+        } else {
+            tp_v1_edit->setText(QString::number(std::abs(model->test_point), 'g', 4));
+            tp_v2_edit->setText(QString::number(std::arg(model->test_point) * 180.0 / PI, 'g', 4));
+        }
+        tol_edit->setText(QString::number(model->rl_tol_deg, 'g', 3));
+        updating_ui = false;
+        evaluateCurrent(false);
+        refreshVaryPoleCombo();
+        fb_bar->loadFromModelS(model);
+    }
+
+    void evaluateCurrent(bool notify) {
+        double v1 = parseNumericInput(tp_v1_edit->text().toStdString(), 0.0);
+        double v2 = parseNumericInput(tp_v2_edit->text().toStdString(), 0.0);
+        Complex tp = is_polar_mode ? std::polar(v1, v2 * PI / 180.0) : Complex(v1, v2);
+        double tol = std::abs(parseNumericInput(tol_edit->text().toStdString(), 0.5));
+        model->test_point = tp;
+        model->rl_tol_deg = tol;
+
+        // Combine G(s) and H(s) poles/zeros
+        auto raw_loop_poles = model->effectiveLoopPolesS();
+        auto raw_loop_zeros = model->effectiveLoopZerosS();
+
+        bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 && !raw_loop_poles.empty());
+        int vary_idx = vary_pole_combo ? std::clamp(vary_pole_combo->currentIndex(), 0, std::max(0, static_cast<int>(raw_loop_poles.size()) - 1)) : 0;
+        double fixed_k0 = edit_fixed_k0 ? std::max(0.0, parseNumericInput(edit_fixed_k0->text().toStdString(), 10.0)) : 10.0;
+
+        std::vector<Complex> loop_poles = raw_loop_poles;
+        std::vector<Complex> loop_zeros = raw_loop_zeros;
+
+        if (is_pole_sweep) {
+            auto eq = buildPoleSweepSystem(raw_loop_poles, raw_loop_zeros, vary_idx, fixed_k0);
+            loop_poles = eq.eq_poles;
+            loop_zeros = eq.eq_zeros;
+        }
+
+        std::string gs_ltx = formatTransferFunctionLatex(model->poles, model->zeros, model->plant_gain, "s", "G");
+        if (!model->unity_feedback_s) {
+            gs_ltx += " \\; , \\quad " + formatTransferFunctionLatex(model->h_poles, model->h_zeros, model->h_gain, "s", "H");
+        } else {
+            gs_ltx += " \\; , \\quad H(s) = 1";
+        }
+        if (is_pole_sweep) {
+            gs_ltx += " \\; \\mathbf{[Sweep\\; p_" + std::to_string(vary_idx + 1) + " = -a \\; @ \\; K_0 = " + PRECISION.fmt(fixed_k0) + "]}";
+        }
+        tf_math_w->setLatex(QString::fromStdString(gs_ltx));
+
+        // Evaluate Root Locus condition on combined loop poles & zeros
+        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, tp, 1.0);
+        last_gain = ev.rl_gain_k;
+        double def = computeAngleDeficiency(ev.angle_deg);
+        bool on_rl = ev.at_pole || (std::abs(def) <= tol);
+
+        val_angle->setText(ev.at_pole ? "Undefined" : QString::fromStdString(PRECISION.fmt(ev.angle_deg) + "°"));
+        val_mag->setText(ev.at_pole ? "Inf" : QString::fromStdString(PRECISION.fmt(ev.magnitude)));
+        val_gain->setText(QString::fromStdString(PRECISION.fmt(ev.rl_gain_k)));
+
+        QString bg = on_rl ? Theme::BANNER_OK_BG : Theme::BANNER_WARN_BG;
+        QString bd = on_rl ? Theme::BANNER_OK_BD : Theme::BANNER_WARN_BD;
+        QString fg = on_rl ? Theme::BANNER_OK_FG : Theme::BANNER_WARN_FG;
+        QString sub_fg = on_rl ? "#a7f3d0" : "#fde68a";
+        QString val_col = on_rl ? Theme::ACCENT_ZERO : Theme::ACCENT_OPEN;
+
+        rl_banner->setStyleSheet(QString("QFrame { background-color: %1; border: 1.5px solid %2; border-radius: 5px; }").arg(bg, bd));
+        banner_title->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 12px; border: none;").arg(fg));
+        banner_right->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; font-size: 11px; border: none;").arg(Theme::TEXT_PRIMARY));
+        banner_sub->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(sub_fg));
+
+        for (auto* vl : {val_angle, val_mag, val_gain}) {
+            vl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(val_col));
+        }
+
+        banner_title->setText(on_rl ? "✔ ON ROOT LOCUS" : "✖ NOT ON ROOT LOCUS");
+        banner_right->setText(on_rl
+            ? QString("|Δθ| = %1° (≤ %2°)").arg(QString::fromStdString(PRECISION.fmt(std::abs(def))), QString::number(tol))
+            : QString("Deficiency Δθ = %1°").arg(QString::fromStdString(PRECISION.fmt(def, true))));
+        banner_sub->setText(on_rl
+            ? QString("Angle condition ∠G(s)H(s) = ±180°(2k+1) satisfied — Closed-loop pole at s for K = %1").arg(QString::fromStdString(PRECISION.fmt(ev.rl_gain_k)))
+            : QString("Off by %1° from ±180° (requires %2° compensator phase to place pole at s)")
+                  .arg(QString::fromStdString(PRECISION.fmt(std::abs(def))), QString::fromStdString(PRECISION.fmt(def, true))));
+
+        // Pass combined loop poles and zeros to the s-plane canvas
+        canvas->poles = loop_poles;
+        canvas->zeros = loop_zeros;
+        canvas->test_point = tp;
+        canvas->is_on_rl = on_rl;
+
+        // Sync s-Plane Spec Overlay Lines
+        canvas->show_ts_line   = chk_ts_spec->isChecked();
+        canvas->spec_ts        = std::max(1e-4, parseNumericInput(edit_ts_spec->text().toStdString(), 2.0));
+        canvas->show_tp_line   = chk_tp_spec->isChecked();
+        canvas->spec_tp        = std::max(1e-4, parseNumericInput(edit_tp_spec->text().toStdString(), 1.0));
+        canvas->show_zeta_line = chk_zeta_spec->isChecked();
+        canvas->spec_zeta      = std::clamp(parseNumericInput(edit_zeta_spec->text().toStdString(), 0.7071), 0.0, 0.9999);
+
+        // Compute Live Closed-Loop Poles for 1 + K * G(s)H(s) = 0 using loop_poles & loop_zeros
+        canvas->show_live_k_poles = chk_live_k->isChecked();
+        canvas->live_k_val = std::max(0.0, parseNumericInput(edit_live_k->text().toStdString(), 1.0));
+        if (canvas->show_live_k_poles) {
+            size_t deg = std::max(loop_poles.size(), loop_zeros.size());
+            Poly den_p = polyFromRoots(loop_poles);
+            Poly num_p = polyFromRoots(loop_zeros);
+            Poly den_pad(deg + 1, Complex(0.0, 0.0));
+            Poly num_pad(deg + 1, Complex(0.0, 0.0));
+            for (size_t i = 0; i < den_p.size(); ++i) den_pad[deg + 1 - den_p.size() + i] = den_p[i];
+            for (size_t i = 0; i < num_p.size(); ++i) num_pad[deg + 1 - num_p.size() + i] = num_p[i];
+
+            Poly char_poly = polyAdd(den_pad, polyScale(num_pad, Complex(canvas->live_k_val, 0.0)));
+            canvas->live_cl_poles = solvePolynomialRoots(char_poly);
+
+            std::string p_list;
+            for (size_t i = 0; i < canvas->live_cl_poles.size(); ++i) {
+                p_list += (i ? ",  " : "") + PRECISION.fmtComplex(canvas->live_cl_poles[i]);
+            }
+            live_k_poles_lbl->setText(QString("CL Poles @ K=%1:  [%2]")
+                .arg(QString::fromStdString(PRECISION.fmt(canvas->live_k_val)))
+                .arg(QString::fromStdString(p_list)));
+        } else {
+            canvas->live_cl_poles.clear();
+            live_k_poles_lbl->setText("Tip: Click any [Ts], [Tp], [ζ], [Brk], or [jω] marker on the locus to snap Test Point s to it.");
+        }
+
+        canvas->update();
+        if (notify) model->notify("root_locus");
+    }
+};
+

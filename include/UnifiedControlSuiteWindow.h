@@ -1,0 +1,366 @@
+#pragma once
+#include "AppSettingsDialog.h"
+
+
+// =============================================================================
+// Main Unified Application Window (All 7 Tabs + Precision Bar)
+// =============================================================================
+class UnifiedControlSuiteWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    SharedSystemModel model;
+    QStackedWidget* stack;
+    std::vector<QPushButton*> tab_btns;
+
+    RootLocusTab* rl_tab;
+    PIDTimeResponseTab* pid_tab;
+    ZPlaneFilterTab* zp_tab;
+    DiscreteTimeResponseTab* dsim_tab;
+    ScientificCalculatorTab* calc_tab;
+    FormulaCheatSheetTab* cheat_tab;
+    BlockDiagramStudioTab* block_tab;
+    FrequencyResponseTab* freq_tab;
+    RouthHurwitzTab* routh_tab;
+
+    explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
+        setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite (C++17 / Qt)");
+        resize(1460, 880);
+        setStyleSheet(QString("QMainWindow { background-color: %1; }").arg(Theme::BG_WINDOW));
+
+        QSettings settings("ControlSuite", "ControlSystemsSuite");
+        model.loadFromSettings(settings);
+        Theme::setLightMode(model.light_mode);
+
+        auto* central = new QWidget(this);
+        setCentralWidget(central);
+        auto* main_v = new QVBoxLayout(central);
+        main_v->setContentsMargins(12, 8, 12, 10);
+
+        // Top Navigation Bar
+        auto* nav = makeCard();
+        nav->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 6px; padding: 5px;")
+                           .arg(Theme::BG_HEADER, Theme::BORDER_PANEL));
+        auto* nav_l = new QHBoxLayout(nav);
+
+        auto* brand = new QLabel("Control Systems & Digital Filter Suite");
+        brand->setStyleSheet(QString("color: %1; font-size: 13px; font-weight: bold; border:none;").arg(Theme::TEXT_PRIMARY));
+        nav_l->addWidget(brand);
+        nav_l->addSpacing(8);
+
+        const std::vector<QString> tab_names = {
+            "1. s-Plane Locus",
+            "2. Time & PID Sim",
+            "3. z-Plane & Filters",
+            "4. Discrete Time Sim",
+            "5. Scientific Calc",
+            "6. Formulas & Cheat Sheet",
+            "7. Block Diagram",
+            "8. Bode & Nyquist",
+            "9. Routh-Hurwitz"
+        };
+
+        for (size_t i = 0; i < tab_names.size(); ++i) {
+            auto* b = new QPushButton(tab_names[i]);
+            b->setCursor(Qt::PointingHandCursor);
+            connect(b, &QPushButton::clicked, this, [this, i]() { switchTab(static_cast<int>(i)); });
+            nav_l->addWidget(b);
+            tab_btns.push_back(b);
+        }
+
+        nav_l->addStretch();
+
+        auto* theme_btn = makeActionBtn(
+            model.light_mode ? "🌙 Dark Mode" : "☀️ Light Mode",
+            Theme::TEXT_PRIMARY,
+            Theme::BG_PANEL_ALT
+        );
+        connect(theme_btn, &QPushButton::clicked, this, [this, theme_btn]() {
+            bool next_light = !model.light_mode;
+            applyThemeLive(next_light);
+            theme_btn->setText(next_light ? "🌙 Dark Mode" : "☀️ Light Mode");
+        });
+        nav_l->addWidget(theme_btn);
+
+        auto* settings_btn = makeActionBtn("⚙ Settings", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        connect(settings_btn, &QPushButton::clicked, this, [this]() {
+            auto* dlg = new AppSettingsDialog(
+                &model,
+                [this]() { refreshAllTabs(); },
+                [this]() { model.resetToDefaults(); refreshAllTabs(); },
+                this
+            );
+            dlg->setAttribute(Qt::WA_DeleteOnClose);
+            dlg->show();
+        });
+        nav_l->addWidget(settings_btn);
+        main_v->addWidget(nav);
+
+        // 7-Tab Stack
+        stack = new QStackedWidget();
+        rl_tab = new RootLocusTab(&model, [this](double k_val) {
+            model.pid_enabled = true;
+            model.kp = k_val; model.ki = 0.0; model.kd = 0.0;
+            pid_tab->loadFromModel();
+            switchTab(1);
+        });
+        pid_tab = new PIDTimeResponseTab(&model);
+        zp_tab  = new ZPlaneFilterTab(&model, [this](double kd_val) {
+            model.filter_gain = kd_val;
+            dsim_tab->loadFromModel();
+            switchTab(3);
+        });
+        dsim_tab  = new DiscreteTimeResponseTab(&model);
+        calc_tab  = new ScientificCalculatorTab(&model);
+        cheat_tab = new FormulaCheatSheetTab(&model);
+        block_tab = new BlockDiagramStudioTab(&model, [this](const std::vector<Complex>& p, const std::vector<Complex>& z, double k) {
+            model.poles = p; model.zeros = z; model.plant_gain = k;
+            if (!p.empty()) model.test_point = p[0];
+            refreshAllTabs();
+        });
+        freq_tab = new FrequencyResponseTab(&model);
+        routh_tab = new RouthHurwitzTab(&model);
+
+        stack->addWidget(rl_tab);
+        stack->addWidget(pid_tab);
+        stack->addWidget(zp_tab);
+        stack->addWidget(dsim_tab);
+        stack->addWidget(calc_tab);
+        stack->addWidget(cheat_tab);
+        stack->addWidget(block_tab);
+        stack->addWidget(freq_tab);
+        stack->addWidget(routh_tab);
+        main_v->addWidget(stack, 1);
+
+        model.listeners.push_back([this](const std::string& src) {
+            if (src != "root_locus")   rl_tab->loadFromModel();
+            if (src != "pid_sim")      pid_tab->loadFromModel();
+            if (src != "z_plane")      zp_tab->loadFromModel();
+            if (src != "discrete_sim") dsim_tab->loadFromModel();
+            if (src != "freq_resp")    freq_tab->loadFromModel();
+            calc_tab->evaluateAll();
+            cheat_tab->refreshBanner();
+            routh_tab->loadFromModel();
+        });
+
+        if (settings.contains("calc/expressions")) {
+            calc_tab->setExpressions(settings.value("calc/expressions").toStringList());
+        }
+        if (settings.contains("win/geometry")) {
+            restoreGeometry(settings.value("win/geometry").toByteArray());
+        }
+        int last_tab = std::clamp(settings.value("win/active_tab", 0).toInt(), 0, 8);
+        switchTab(last_tab);
+
+        applyThemeLive(model.light_mode);
+    }
+
+    void switchTab(int idx) {
+        stack->setCurrentIndex(idx);
+        for (size_t i = 0; i < tab_btns.size(); ++i) {
+            bool act = (static_cast<int>(i) == idx);
+            tab_btns[i]->setStyleSheet(QString(
+                "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 5px 9px; font-weight: bold; font-size: 11px; }"
+            ).arg(act ? Theme::BG_KEY_ACCENT : Theme::BG_INPUT,
+                  act ? "#ffffff" : Theme::TEXT_SECONDARY,
+                  Theme::BORDER_INPUT));
+        }
+    }
+
+    void refreshAllTabs() {
+        rl_tab->loadFromModel();
+        pid_tab->loadFromModel();
+        zp_tab->loadFromModel();
+        dsim_tab->loadFromModel();
+        freq_tab->loadFromModel();
+        calc_tab->evaluateAll();
+        cheat_tab->refreshBanner();
+        routh_tab->loadFromModel();
+    }
+    
+    void applyThemeLive(bool light) {
+        // 1. Force canonical opposite state first so old_c is guaranteed to differ from new_c
+        //    (also ensures calling applyThemeLive(model.light_mode) at startup works properly)
+        Theme::setLightMode(!light);
+        std::vector<QString> old_c = {
+            Theme::BG_WINDOW, Theme::BG_HEADER, Theme::BG_PANEL, Theme::BG_PANEL_ALT,
+            Theme::BG_INPUT, Theme::BG_PLOT, Theme::BG_KEY_NUM, Theme::BG_KEY_FN, Theme::BG_KEY_ACCENT,
+            Theme::BORDER_PANEL, Theme::BORDER_INPUT, Theme::BORDER_FOCUS, Theme::BORDER_BTN,
+            Theme::TEXT_PRIMARY, Theme::TEXT_SECONDARY, Theme::TEXT_MUTED,
+            Theme::ACCENT_POLE, Theme::ACCENT_ZERO, Theme::ACCENT_PID, Theme::ACCENT_LOCUS,
+            Theme::ACCENT_ARROW, Theme::ACCENT_ASYMP, Theme::ACCENT_OPEN, Theme::ACCENT_IMAG,
+            Theme::BANNER_OK_BG, Theme::BANNER_OK_BD, Theme::BANNER_OK_FG,
+            Theme::BANNER_WARN_BG, Theme::BANNER_WARN_BD, Theme::BANNER_WARN_FG,
+            Theme::BANNER_ERR_BG, Theme::BANNER_ERR_BD, Theme::BANNER_ERR_FG,
+            Theme::GRID_MAJOR, Theme::AXIS_LINE
+        };
+
+        Theme::setLightMode(light);
+        model.light_mode = light;
+
+        std::vector<QString> new_c = {
+            Theme::BG_WINDOW, Theme::BG_HEADER, Theme::BG_PANEL, Theme::BG_PANEL_ALT,
+            Theme::BG_INPUT, Theme::BG_PLOT, Theme::BG_KEY_NUM, Theme::BG_KEY_FN, Theme::BG_KEY_ACCENT,
+            Theme::BORDER_PANEL, Theme::BORDER_INPUT, Theme::BORDER_FOCUS, Theme::BORDER_BTN,
+            Theme::TEXT_PRIMARY, Theme::TEXT_SECONDARY, Theme::TEXT_MUTED,
+            Theme::ACCENT_POLE, Theme::ACCENT_ZERO, Theme::ACCENT_PID, Theme::ACCENT_LOCUS,
+            Theme::ACCENT_ARROW, Theme::ACCENT_ASYMP, Theme::ACCENT_OPEN, Theme::ACCENT_IMAG,
+            Theme::BANNER_OK_BG, Theme::BANNER_OK_BD, Theme::BANNER_OK_FG,
+            Theme::BANNER_WARN_BG, Theme::BANNER_WARN_BD, Theme::BANNER_WARN_FG,
+            Theme::BANNER_ERR_BG, Theme::BANNER_ERR_BD, Theme::BANNER_ERR_FG,
+            Theme::GRID_MAJOR, Theme::AXIS_LINE
+        };
+
+        auto swapSheetStr = [&](QString ss) -> QString {
+            if (ss.isEmpty()) return ss;
+            for (size_t i = 0; i < old_c.size(); ++i) {
+                ss.replace(old_c[i], QString("__THEME_TOK_%1__").arg(i), Qt::CaseInsensitive);
+            }
+            for (size_t i = 0; i < new_c.size(); ++i) {
+                ss.replace(QString("__THEME_TOK_%1__").arg(i), new_c[i]);
+            }
+            return ss;
+        };
+
+        // 3. Update global QPalette (Fusion uses Base/Button/Highlight to draw native checkmarks & radios)
+        if (qApp) {
+            QPalette pal = qApp->palette();
+            pal.setColor(QPalette::Window, QColor(Theme::BG_WINDOW));
+            pal.setColor(QPalette::WindowText, QColor(Theme::TEXT_PRIMARY));
+            pal.setColor(QPalette::Base, QColor(Theme::BG_INPUT));
+            pal.setColor(QPalette::AlternateBase, QColor(Theme::BG_PANEL_ALT));
+            pal.setColor(QPalette::Text, QColor(Theme::TEXT_PRIMARY));
+            pal.setColor(QPalette::Button, QColor(Theme::BG_INPUT));
+            pal.setColor(QPalette::ButtonText, QColor(Theme::TEXT_PRIMARY));
+            pal.setColor(QPalette::Highlight, QColor(Theme::ACCENT_ZERO));
+            pal.setColor(QPalette::HighlightedText, QColor(Theme::BG_WINDOW));
+            pal.setColor(QPalette::Mid, QColor(Theme::BORDER_INPUT));
+            pal.setColor(QPalette::Dark, QColor(Theme::BORDER_INPUT));
+            qApp->setPalette(pal);
+
+            // Style only the QSlider in CSS so QCheckBox/QRadioButton keep their native Fusion checkmarks
+            QString global_controls_ss = QString(
+                "QSlider::groove:horizontal { "
+                "    height: 6px; background: %1; border: 1px solid %2; border-radius: 3px; "
+                "} "
+                "QSlider::sub-page:horizontal { "
+                "    background: %3; border-radius: 3px; "
+                "} "
+                "QSlider::handle:horizontal { "
+                "    background: %4; border: 1px solid %3; width: 12px; margin: -4px 0; border-radius: 6px; "
+                "} "
+                "QSlider::groove:horizontal:disabled { background: %1; border-color: %2; } "
+                "QSlider::sub-page:horizontal:disabled { background: %2; } "
+                "QSlider::handle:horizontal:disabled { background: %2; border-color: %2; } "
+            ).arg(Theme::BG_PANEL_ALT, Theme::BORDER_INPUT, Theme::ACCENT_ZERO, Theme::TEXT_PRIMARY);
+
+            qApp->setStyleSheet(global_controls_ss);
+        }
+
+        // 4. Swap all individual widget stylesheets and repaint
+        this->setStyleSheet(swapSheetStr(this->styleSheet()));
+        for (QWidget* w : this->findChildren<QWidget*>()) {
+            if (!w->styleSheet().isEmpty()) {
+                w->setStyleSheet(swapSheetStr(w->styleSheet()));
+            }
+            if (auto* mw = dynamic_cast<MathFormulaWidget*>(w)) {
+                if (mw->bg_color.isValid() && mw->bg_color.alpha() > 0) {
+                    mw->bg_color = QColor(swapSheetStr(mw->bg_color.name()));
+                }
+            }
+            w->update();
+        }
+    }
+
+    protected:
+    void closeEvent(QCloseEvent* event) override {
+        QSettings settings("ControlSuite", "ControlSystemsSuite");
+        model.saveToSettings(settings);
+        settings.setValue("calc/expressions", calc_tab->getExpressions());
+        settings.setValue("win/active_tab", stack->currentIndex());
+        settings.setValue("win/geometry", saveGeometry());
+        QMainWindow::closeEvent(event);
+    }
+};
+
+
+// =============================================================================
+// CLI Runner & Entry Point
+// =============================================================================
+inline int runCli(int argc, char* argv[]) {
+    SharedSystemModel model;
+    bool do_sim = false, do_dsim = false, no_pid = false;
+    std::optional<Complex> test_pt;
+    std::vector<std::string> calc_exprs;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        auto nextVal = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : ""; };
+
+        if (arg == "--num") model.zeros = parsePolynomialInput(nextVal()).roots;
+        else if (arg == "--den") model.poles = parsePolynomialInput(nextVal()).roots;
+        else if (arg == "--znum") model.z_zeros = parsePolynomialInput(nextVal()).roots;
+        else if (arg == "--zden") model.z_poles = parsePolynomialInput(nextVal()).roots;
+        else if (arg == "--gain") model.plant_gain = std::stod(nextVal());
+        else if (arg == "--rmag") model.input_magnitude = std::stod(nextVal());
+        else if (arg == "--kp") model.kp = std::stod(nextVal());
+        else if (arg == "--ki") model.ki = std::stod(nextVal());
+        else if (arg == "--kd") model.kd = std::stod(nextVal());
+        else if (arg == "--no-pid") { no_pid = true; model.pid_enabled = false; model.d_pid_enabled = false; }
+        else if (arg == "--simulate") do_sim = true;
+        else if (arg == "--dsimulate") do_dsim = true;
+        else if (arg == "--point") {
+            std::string p = nextVal();
+            auto comma = p.find(',');
+            double re = std::stod(p.substr(0, comma));
+            double im = (comma != std::string::npos) ? std::stod(p.substr(comma + 1)) : 0.0;
+            test_pt = Complex(re, im);
+        } else if (arg == "--calc") {
+            while (i + 1 < argc && argv[i + 1][0] != '-') calc_exprs.push_back(argv[++i]);
+        }
+    }
+
+    if (test_pt.has_value()) {
+        auto ev = evaluateTransferFunction(model.poles, model.zeros, test_pt.value(), 1.0);
+        std::cout << "=== 1. s-Plane Root Locus Evaluation ===\n"
+                  << "  Test Point s : " << PRECISION.fmtComplex(test_pt.value()) << "\n"
+                  << "  Angle ∠G(s)  : " << PRECISION.fmt(ev.angle_deg) << " deg\n"
+                  << "  Mag |G(s)|   : " << PRECISION.fmt(ev.magnitude) << "\n"
+                  << "  RL Gain K    : " << PRECISION.fmt(ev.rl_gain_k) << "\n";
+    }
+    if (do_sim) {
+        SimulationConfig cfg;
+        cfg.poles = model.poles; cfg.zeros = model.zeros;
+        cfg.plant_gain = model.plant_gain; cfg.input_magnitude = model.input_magnitude;
+        cfg.pid_enabled = !no_pid;
+        cfg.kp = model.kp; cfg.ki = model.ki; cfg.kd = model.kd;
+        auto res = ComplexTransferFunctionSimulator::evaluate(cfg);
+        model.last_sim_result = res;
+        std::cout << "=== 2. Continuous Time Response Simulation ===\n"
+                  << "  Controller   : " << (cfg.pid_enabled ? "PID Active" : "PID Disabled (C(s) = 1)") << "\n"
+                  << "  Stability    : " << res.stability_state << " (" << res.damping_regime << ")\n"
+                  << "  Damping ζ    : " << PRECISION.fmt(res.zeta) << " | ωn = " << PRECISION.fmt(res.omega_n) << " rad/s\n"
+                  << "  Overshoot    : " << PRECISION.fmt(res.overshoot_pct) << "% | Peak = " << PRECISION.fmt(res.peak_value) << "\n"
+                  << "  Settling Ts  : " << PRECISION.fmt(res.settling_time) << " s | Rise Tr = " << PRECISION.fmt(res.rise_time) << " s\n"
+                  << "  S.S.E.       : " << PRECISION.fmt(res.steady_state_error) << " (" << PRECISION.fmt(res.relative_error_pct) << "%)\n";
+    }
+    if (do_dsim) {
+        DiscreteSimulationConfig dcfg;
+        dcfg.z_poles = model.z_poles; dcfg.z_zeros = model.z_zeros;
+        dcfg.filter_gain = model.filter_gain; dcfg.ts = model.ts;
+        dcfg.pid_enabled = !no_pid;
+        auto dres = DiscreteFilterSimulator::evaluate(dcfg);
+        std::cout << "=== 4. Discrete Time Response Simulation ===\n"
+                  << "  Diff Eq      : " << dres.diff_eq_str << "\n"
+                  << "  Stability    : " << dres.stability_state << " (max|z| = " << PRECISION.fmt(dres.max_pole_mag) << ")\n"
+                  << "  S.S.E.       : " << PRECISION.fmt(dres.steady_state_error) << "\n";
+    }
+    if (!calc_exprs.empty()) {
+        ScientificCalcEngine eng(&model);
+        std::cout << "=== 5. Scientific Calculator ===\n";
+        for (const auto& ex : calc_exprs) {
+            auto out = eng.evalLine(ex);
+            std::cout << "  " << ex << "  -->  " << (out.ok ? out.formatted_dec : ("ERROR: " + out.error_msg)) << "\n";
+        }
+    }
+    return 0;
+}

@@ -1,0 +1,20 @@
+# Build directories
+build/
+build-*/
+dist/
+dist-*/
+
+# Compiled binaries & object files
+*.o
+*.out
+*.exe
+*.app
+*.dmg
+*.zip
+control_systems_suite
+
+# Local backups & machine-specific files
+*.bak
+*.user
+ControlSystemsSuite.desktop
+EOF
