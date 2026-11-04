@@ -41,9 +41,9 @@ public:
     bool updating_ui = false;
     FeedbackConfigBar* fb_bar;
 
-    QComboBox *locus_param_combo, *vary_pole_combo;
-    QLineEdit *edit_fixed_k0;
-    QLabel *lbl_vary_pole, *lbl_fixed_k0, *gain_title_lbl;
+    QComboBox *locus_param_combo = nullptr, *vary_pole_combo = nullptr;
+    QLineEdit *edit_fixed_k0 = nullptr;
+    QLabel *lbl_vary_pole = nullptr, *lbl_fixed_k0 = nullptr, *gain_title_lbl = nullptr;
 
     RootLocusTab(SharedSystemModel* m, std::function<void(double)> send_cb, QWidget* parent = nullptr)
         : QWidget(parent), model(m), onSendGainToPid(std::move(send_cb))
@@ -251,19 +251,23 @@ public:
         res_l->addWidget(rl_banner);
 
         auto* m_grid = new QHBoxLayout();
-        auto makeMetric = [&](const QString& lbl, QLabel*& out_lbl) {
+        auto makeMetric = [&](const QString& lbl, QLabel*& out_lbl, QLabel** out_title = nullptr) {
             auto* box = makeCard();
             box->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 4px; padding: 5px;").arg(Theme::BG_INPUT, Theme::BORDER_INPUT));
             auto* vl = new QVBoxLayout(box);
             vl->setContentsMargins(6, 4, 6, 4);
-            auto* t = new QLabel(lbl); t->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
-            out_lbl = new QLabel("—"); out_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
-            vl->addWidget(t); vl->addWidget(out_lbl);
+            auto* t = new QLabel(lbl);
+            t->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
+            if (out_title) *out_title = t;
+            out_lbl = new QLabel("—");
+            out_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            vl->addWidget(t);
+            vl->addWidget(out_lbl);
             m_grid->addWidget(box);
         };
         makeMetric("NET ANGLE (deg)", val_angle);
         makeMetric("MAGNITUDE |G(s)|", val_mag);
-        makeMetric("GAIN K = 1/|G(s)|", val_gain);
+        makeMetric("GAIN K = 1/|G(s)|", val_gain, &gain_title_lbl);
         res_l->addLayout(m_grid);
         left_v->addWidget(res_card);
         left_v->addStretch();
