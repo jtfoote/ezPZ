@@ -1,0 +1,105 @@
+name: Build macOS & Windows Executables
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # Lets you click "Run workflow" manually on GitHub
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. macOS Universal Binary (.dmg & .zip) for Older Intel + Apple Silicon Macs
+  # ---------------------------------------------------------------------------
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 (Universal Binary)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.3' # Supports macOS 11.0+ and Universal (x86_64 + arm64)
+
+      - name: Fetch Eigen3 (Header-Only)
+        run: |
+          git clone --depth 1 --branch 3.4.0 https://gitlab.com/libeigen/eigen.git
+          cmake -B eigen/build -S eigen -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/eigen_install"
+          cmake --install eigen/build
+
+      - name: Configure, Build, and Package Universal macOS .app & .dmg
+        run: |
+          SRC_DIR="."
+          if [ -f "cpp/CMakeLists.txt" ]; then SRC_DIR="cpp"; fi
+
+          cmake -S "$SRC_DIR" -B build-mac -DCMAKE_BUILD_TYPE=Release \
+            -DEigen3_DIR="$RUNNER_TEMP/eigen_install/share/eigen3/cmake" \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="11.0"
+          cmake --build build-mac --config Release --parallel
+
+          APP_PATH="build-mac/control_systems_suite.app"
+          macdeployqt "$APP_PATH" -always-overwrite
+          codesign --force --deep --sign - "$APP_PATH"
+
+          hdiutil create -volname "Control Systems Suite" \
+            -srcfolder "$APP_PATH" -ov -format UDZO \
+            ControlSystemsSuite-macOS-Universal.dmg
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$APP_PATH" ControlSystemsSuite-macOS-Universal-App.zip
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControlSystemsSuite-macOS-Universal
+          path: |
+            ControlSystemsSuite-macOS-Universal.dmg
+            ControlSystemsSuite-macOS-Universal-App.zip
+
+  # ---------------------------------------------------------------------------
+  # 2. Windows 64-bit Standalone Executable (.zip)
+  # ---------------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 for Windows MSVC
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.6.3'
+          arch: 'win64_msvc2019_64'
+
+      - name: Fetch Eigen3 (Header-Only)
+        shell: bash
+        run: |
+          git clone --depth 1 --branch 3.4.0 https://gitlab.com/libeigen/eigen.git
+          cmake -B eigen/build -S eigen -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/eigen_install"
+          cmake --install eigen/build
+
+      - name: Configure, Build, and Bundle Windows .exe with windeployqt
+        shell: bash
+        run: |
+          SRC_DIR="."
+          if [ -f "cpp/CMakeLists.txt" ]; then SRC_DIR="cpp"; fi
+
+          cmake -S "$SRC_DIR" -B build-win \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEigen3_DIR="$RUNNER_TEMP/eigen_install/share/eigen3/cmake"
+          cmake --build build-win --config Release --parallel
+
+          mkdir -p dist-win
+          if [ -f "build-win/Release/control_systems_suite.exe" ]; then
+            cp "build-win/Release/control_systems_suite.exe" dist-win/
+          else
+            cp "build-win/control_systems_suite.exe" dist-win/
+          fi
+
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist-win/control_systems_suite.exe
+
+      - name: Upload Windows .zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControlSystemsSuite-Windows-x64
+          path: dist-win/

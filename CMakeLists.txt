@@ -1,68 +1,48 @@
 cmake_minimum_required(VERSION 3.16)
-project(ControlSystemsSuite LANGUAGES CXX)
+project(control_systems_suite VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
-if(NOT Qt6_FOUND)
-    find_package(Qt5 5.15 COMPONENTS Core Gui Widgets Svg REQUIRED)
+# Older macOS support
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment version")
+    set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Build Universal Binary")
 endif()
 
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 find_package(Eigen3 REQUIRED NO_MODULE)
+
+file(GLOB MODULE_SOURCES "src/*.cpp")
+file(GLOB MODULE_HEADERS "include/*.h")
 
 add_executable(control_systems_suite
     main.cpp
-    src/ComplexPlaneCanvas.cpp
-    src/TimeResponseCanvas.cpp
-    src/DesignParametersDialog.cpp
-    src/RootLocusTab.cpp
-    src/PIDTimeResponseTab.cpp
-    src/ZPlaneFilterTab.cpp
-    src/DiscreteTimeResponseTab.cpp
-    src/ScientificCalculatorTab.cpp
-    src/FormulaCheatSheetTab.cpp
-    src/BlockDiagramCanvas.cpp
-    src/BlockDiagramStudioTab.cpp
-    src/BodeNyquistCanvas.cpp
-    src/FrequencyResponseTab.cpp
-    src/RouthHurwitzTab.cpp
-    src/AppSettingsDialog.cpp
-    src/UnifiedControlSuiteWindow.cpp
-    include/CommonIncludes.h
-    include/CoreAndWidgets.h
-    include/ComplexPlaneCanvas.h
-    include/TimeResponseCanvas.h
-    include/DesignParametersDialog.h
-    include/RootLocusTab.h
-    include/PIDTimeResponseTab.h
-    include/ZPlaneFilterTab.h
-    include/DiscreteTimeResponseTab.h
-    include/ScientificCalculatorTab.h
-    include/FormulaCheatSheetTab.h
-    include/BlockDiagramCanvas.h
-    include/BlockDiagramStudioTab.h
-    include/BodeNyquistCanvas.h
-    include/FrequencyResponseTab.h
-    include/RouthHurwitzTab.h
-    include/AppSettingsDialog.h
-    include/UnifiedControlSuiteWindow.h
+    ${MODULE_SOURCES}
+    ${MODULE_HEADERS}
 )
 
-target_include_directories(control_systems_suite PRIVATE include)
+if(APPLE)
+    set_target_properties(control_systems_suite PROPERTIES
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.jadenfoote.controlsystemssuite"
+        MACOSX_BUNDLE_BUNDLE_NAME "Control Systems Suite"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    )
+endif()
 
-if(Qt6_FOUND)
-    target_link_libraries(control_systems_suite PRIVATE
+target_include_directories(control_systems_suite PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+target_link_libraries(control_systems_suite PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
     Qt6::Svg
     Eigen3::Eigen
-)
-else()
-    target_link_libraries(control_systems_suite PRIVATE Qt5::Core Qt5::Gui Qt5::Widgets Eigen3::Eigen)
-endif()
+    )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(control_systems_suite PRIVATE -O3 -Wall -Wextra)
