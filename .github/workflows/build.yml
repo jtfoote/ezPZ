@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. Linux Standalone AppImage & Portable Bundle (x86_64)
+  # 1. Linux Standalone AppImage, Portable Bundle & Start Menu Installer (x86_64)
   # ---------------------------------------------------------------------------
   build-linux:
     runs-on: ubuntu-22.04
@@ -88,6 +88,35 @@ jobs:
             --plugin qt \
             --output appimage
 
+          # Create an automatic Start Menu installer script for the target Linux machine
+          cat << 'INSTALLER' > install.sh
+          #!/usr/bin/env bash
+          set -e
+          APP_DIR="$HOME/.local/opt/ControlSystemsSuite"
+          mkdir -p "$APP_DIR" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
+
+          cp -f ControlSystemsSuite-Linux-x86_64.AppImage "$APP_DIR/"
+          chmod +x "$APP_DIR/ControlSystemsSuite-Linux-x86_64.AppImage"
+          cp -f ControlSystemsSuite.svg "$HOME/.local/share/icons/hicolor/scalable/apps/"
+
+          cat << EOF > "$HOME/.local/share/applications/ControlSystemsSuite.desktop"
+          [Desktop Entry]
+          Type=Application
+          Name=Control Systems Suite
+          Comment=Interactive Control Systems & DSP Engineering Suite
+          Exec=$APP_DIR/ControlSystemsSuite-Linux-x86_64.AppImage
+          Icon=$HOME/.local/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg
+          Terminal=false
+          Categories=Science;Engineering;Education;
+          EOF
+
+          chmod +x "$HOME/.local/share/applications/ControlSystemsSuite.desktop"
+          update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+          echo "✅ Control Systems Suite installed! You can now launch it from your Start Menu."
+          INSTALLER
+          chmod +x install.sh
+          cp AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg .
+
           # Also create a standard .tar.gz portable bundle (in case FUSE isn't installed on the target machine)
           tar -czf ControlSystemsSuite-Linux-x86_64-Portable.tar.gz -C AppDir .
 
@@ -98,6 +127,8 @@ jobs:
           path: |
             ControlSystemsSuite-Linux-x86_64.AppImage
             ControlSystemsSuite-Linux-x86_64-Portable.tar.gz
+            ControlSystemsSuite.svg
+            install.sh
 
   # ---------------------------------------------------------------------------
   # 2. macOS Universal Binary (.dmg & .zip) for Older Intel + Apple Silicon Macs

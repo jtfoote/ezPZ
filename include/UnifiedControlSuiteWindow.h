@@ -1,5 +1,6 @@
 #pragma once
 #include "AppSettingsDialog.h"
+#include "SignalPlotterTab.h"
 
 
 // =============================================================================
@@ -22,6 +23,7 @@ public:
     BlockDiagramStudioTab* block_tab;
     FrequencyResponseTab* freq_tab;
     RouthHurwitzTab* routh_tab;
+    SignalPlotterTab* sig_tab;
 
     explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite (C++17 / Qt)");
@@ -57,7 +59,8 @@ public:
             "6. Formulas & Cheat Sheet",
             "7. Block Diagram",
             "8. Bode & Nyquist",
-            "9. Routh-Hurwitz"
+            "9. Routh-Hurwitz",
+            "10. Signal & Spectrum"
         };
 
         auto* ws_lbl = new QLabel("Workspace:");
@@ -210,6 +213,7 @@ public:
         });
         freq_tab = new FrequencyResponseTab(&model);
         routh_tab = new RouthHurwitzTab(&model);
+        sig_tab = new SignalPlotterTab(&model);
 
         stack->addWidget(rl_tab);
         stack->addWidget(pid_tab);
@@ -220,6 +224,7 @@ public:
         stack->addWidget(block_tab);
         stack->addWidget(freq_tab);
         stack->addWidget(routh_tab);
+        stack->addWidget(sig_tab);
         main_v->addWidget(stack, 1);
 
         model.listeners.push_back([this](const std::string& src) {
@@ -246,7 +251,7 @@ public:
                 move(avail.topLeft());
             }
         }
-        int last_tab = std::clamp(settings.value("win/active_tab", 0).toInt(), 0, 8);
+        int last_tab = std::clamp(settings.value("win/active_tab", 0).toInt(), 0, 9);
         switchTab(last_tab);
 
         applyThemeLive(model.light_mode);

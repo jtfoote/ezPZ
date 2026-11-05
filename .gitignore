@@ -12,6 +12,7 @@ dist-*/
 *.dmg
 *.zip
 control_systems_suite
+main_old.cpp
 
 # Local backups & machine-specific files
 *.bak
