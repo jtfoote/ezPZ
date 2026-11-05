@@ -54,3 +54,5 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <QShortcut>
+#include <QKeySequence>

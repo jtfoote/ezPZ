@@ -2238,7 +2238,9 @@ public:
 
     void notify(const std::string& source_tab) {
         if (!sync_enabled) return;
-        for (auto& cb : listeners) cb(source_tab);
+        for (auto& cb : listeners) {
+            cb(source_tab);
+        }
     }
 
     // Continuous Feedback Sensor H(s) (Unity H(s)=1 when unity_feedback_s == true)

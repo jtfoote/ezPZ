@@ -104,17 +104,71 @@ public:
         nav_l->addWidget(prev_tab_btn);
         nav_l->addWidget(next_tab_btn);
 
+        auto stepTabPrev = [this]() {
+            if (!stack || stack->count() == 0) return;
+            int prev_i = (stack->currentIndex() - 1 + stack->count()) % stack->count();
+            switchTab(prev_i);
+        };
+
+        auto stepTabNext = [this]() {
+            if (!stack || stack->count() == 0) return;
+            int next_i = (stack->currentIndex() + 1) % stack->count();
+            switchTab(next_i);
+        };
+
+        // Install global event filter on qApp so Alt+Left / Alt+Right always work
+        if (qApp) {
+            qApp->installEventFilter(this);
+        }
+
         nav_l->addStretch();
 
+        auto* sync_btn = makeActionBtn(
+            model.sync_enabled ? "🔗 Sync: ON" : "🔓 Sync: OFF",
+            model.sync_enabled ? Theme::ACCENT_PID : Theme::TEXT_MUTED,
+            Theme::BG_PANEL_ALT
+        );
+        sync_btn->setToolTip("Toggle cross-tab transfer function G(s) / H(z) synchronization");
+        connect(sync_btn, &QPushButton::clicked, this, [this, sync_btn]() {
+            model.sync_enabled = !model.sync_enabled;
+            sync_btn->setText(model.sync_enabled ? "🔗 Sync: ON" : "🔓 Sync: OFF");
+            sync_btn->setStyleSheet(QString(
+                "QPushButton { background-color: %1; color: %2; border: 1px solid %2; border-radius: 4px; padding: 4px 9px; font-weight: bold; font-size: 11px; }"
+                "QPushButton:hover { background-color: %3; color: %2; border: 1px solid %2; }"
+            ).arg(Theme::BG_PANEL_ALT,
+                  model.sync_enabled ? Theme::ACCENT_PID : Theme::TEXT_MUTED,
+                  Theme::BG_KEY_NUM));
+
+            // If turning Sync back ON, push the currently visible tab's G(s)/H(z) to all other tabs!
+            if (model.sync_enabled) {
+                int cur = stack->currentIndex();
+                if (cur == 0 && rl_tab) {
+                    model.poles = rl_tab->poles_card->getValues();
+                    model.zeros = rl_tab->zeros_card->getValues();
+                    rl_tab->fb_bar->syncToModelS(&model);
+                } else if (cur == 1 && pid_tab) {
+                    model.poles = pid_tab->poles_card->getValues();
+                    model.zeros = pid_tab->zeros_card->getValues();
+                    pid_tab->fb_bar->syncToModelS(&model);
+                } else if (cur == 7 && freq_tab && freq_tab->domain_combo->currentIndex() != 2) {
+                    model.poles = freq_tab->poles_card->getValues();
+                    model.zeros = freq_tab->zeros_card->getValues();
+                    freq_tab->fb_bar->syncToModelS(&model);
+                }
+                refreshAllTabs();
+            }
+        });
+        nav_l->addWidget(sync_btn);
+
         auto* theme_btn = makeActionBtn(
-            model.light_mode ? "🌙 Dark Mode" : "☀️ Light Mode",
+            model.light_mode ? "🌙" : "☀️",
             Theme::TEXT_PRIMARY,
             Theme::BG_PANEL_ALT
         );
         connect(theme_btn, &QPushButton::clicked, this, [this, theme_btn]() {
             bool next_light = !model.light_mode;
             applyThemeLive(next_light);
-            theme_btn->setText(next_light ? "🌙 Dark Mode" : "☀️ Light Mode");
+            theme_btn->setText(next_light ? "🌙" : "☀️");
         });
         nav_l->addWidget(theme_btn);
 
@@ -198,6 +252,44 @@ public:
         applyThemeLive(model.light_mode);
     }
 
+    void activateIndependentTabState(int idx) {
+        if (model.sync_enabled) return; // When synced, all tabs already share model
+
+        // Push the active tab's own UI cards/inputs into model without notifying other tabs
+        if (idx == 0 && rl_tab) {
+            model.poles = rl_tab->poles_card->getValues();
+            model.zeros = rl_tab->zeros_card->getValues();
+            rl_tab->fb_bar->syncToModelS(&model);
+            rl_tab->evaluateCurrent(false);
+        } else if (idx == 1 && pid_tab) {
+            model.poles = pid_tab->poles_card->getValues();
+            model.zeros = pid_tab->zeros_card->getValues();
+            pid_tab->fb_bar->syncToModelS(&model);
+            pid_tab->runSimulation(false);
+        } else if (idx == 2 && zp_tab) {
+            model.z_poles = zp_tab->poles_card->getValues();
+            model.z_zeros = zp_tab->zeros_card->getValues();
+            zp_tab->fb_bar->syncToModelZ(&model);
+            zp_tab->evaluateCurrent(false);
+        } else if (idx == 3 && dsim_tab) {
+            model.z_poles = dsim_tab->poles_card->getValues();
+            model.z_zeros = dsim_tab->zeros_card->getValues();
+            dsim_tab->fb_bar->syncToModelZ(&model);
+            dsim_tab->runSimulation(false);
+        } else if (idx == 7 && freq_tab) {
+            if (freq_tab->domain_combo->currentIndex() != 2) {
+                model.poles = freq_tab->poles_card->getValues();
+                model.zeros = freq_tab->zeros_card->getValues();
+                freq_tab->fb_bar->syncToModelS(&model);
+            } else {
+                model.z_poles = freq_tab->poles_card->getValues();
+                model.z_zeros = freq_tab->zeros_card->getValues();
+                freq_tab->fb_bar->syncToModelZ(&model);
+            }
+            freq_tab->evaluateCurrent(false);
+        }
+    }
+
     void switchTab(int idx) {
         if (idx < 0 || idx >= stack->count()) return;
         stack->setCurrentIndex(idx);
@@ -205,6 +297,7 @@ public:
             QSignalBlocker blocker(tab_combo);
             tab_combo->setCurrentIndex(idx);
         }
+        activateIndependentTabState(idx);
     }
 
     void refreshAllTabs() {
@@ -313,6 +406,31 @@ public:
     }
 
     protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) {
+            auto* ke = static_cast<QKeyEvent*>(event);
+            // Check that ONLY the Alt modifier is held
+            if ((ke->modifiers() & (Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier)) == Qt::AltModifier) {
+                if (ke->key() == Qt::Key_Left || ke->key() == Qt::Key_Right) {
+                    if (event->type() == QEvent::ShortcutOverride) {
+                        // Tell Qt not to let QLineEdit/QComboBox swallow Alt+Left/Right
+                        event->accept();
+                        return true;
+                    }
+                    // On the actual KeyPress, switch the tab
+                    if (stack && stack->count() > 0 && this->isActiveWindow()) {
+                        int delta = (ke->key() == Qt::Key_Left) ? -1 : 1;
+                        int next_i = (stack->currentIndex() + delta + stack->count()) % stack->count();
+                        switchTab(next_i);
+                        event->accept();
+                        return true;
+                    }
+                }
+            }
+        }
+        return QMainWindow::eventFilter(watched, event);
+    }
+
     void closeEvent(QCloseEvent* event) override {
         QSettings settings("ControlSuite", "ControlSystemsSuite");
         model.saveToSettings(settings);
