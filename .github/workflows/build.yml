@@ -1,13 +1,106 @@
-name: Build macOS & Windows Executables
+name: Build Linux, macOS & Windows Executables
 
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Lets you click "Run workflow" manually on GitHub
+  workflow_dispatch:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. macOS Universal Binary (.dmg & .zip) for Older Intel + Apple Silicon Macs
+  # 1. Linux Standalone AppImage & Portable Bundle (x86_64)
+  # ---------------------------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies for Qt6 & AppImage packaging
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xfixes0 libxcb-cursor0 libfuse2 file desktop-file-utils
+
+      - name: Install Qt 6 for Linux
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.6.3'
+
+      - name: Fetch Eigen3 (Header-Only)
+        run: |
+          git clone --depth 1 --branch 3.4.0 https://gitlab.com/libeigen/eigen.git
+          cmake -B eigen/build -S eigen -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/eigen_install"
+          cmake --install eigen/build
+
+      - name: Configure, Build, and Package Linux AppImage
+        run: |
+          SRC_DIR="."
+          if [ -f "cpp/CMakeLists.txt" ]; then SRC_DIR="cpp"; fi
+
+          cmake -S "$SRC_DIR" -B build-linux \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DEigen3_DIR="$RUNNER_TEMP/eigen_install/share/eigen3/cmake"
+          cmake --build build-linux --config Release --parallel
+
+          # Prepare AppDir structure
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
+          cp build-linux/control_systems_suite AppDir/usr/bin/
+
+          cat << 'DESKTOP' > AppDir/usr/share/applications/ControlSystemsSuite.desktop
+          [Desktop Entry]
+          Type=Application
+          Name=Control Systems Suite
+          Comment=Interactive Control Systems & DSP Engineering Suite
+          Exec=control_systems_suite
+          Icon=ControlSystemsSuite
+          Terminal=false
+          Categories=Science;Engineering;Education;
+          DESKTOP
+
+          # Generate a clean vector icon required by linuxdeploy
+          cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="12" fill="#0b0f19"/>
+            <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
+            <path d="M12 48 Q28 8 44 32 T56 20" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="24" cy="24" r="4" fill="#ef4444"/>
+            <circle cx="24" cy="40" r="4" fill="#ef4444"/>
+          </svg>
+          SVG
+
+          # Download linuxdeploy and its Qt plugin
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+          export QMAKE="$(which qmake6 || which qmake)"
+          export EXTRA_QT_PLUGINS="svg;iconengines;wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration"
+          export LDAI_OUTPUT="ControlSystemsSuite-Linux-x86_64.AppImage"
+
+          # Run linuxdeploy (using --appimage-extract-and-run for CI compatibility)
+          ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/control_systems_suite \
+            --desktop-file AppDir/usr/share/applications/ControlSystemsSuite.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg \
+            --plugin qt \
+            --output appimage
+
+          # Also create a standard .tar.gz portable bundle (in case FUSE isn't installed on the target machine)
+          tar -czf ControlSystemsSuite-Linux-x86_64-Portable.tar.gz -C AppDir .
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControlSystemsSuite-Linux-x86_64
+          path: |
+            ControlSystemsSuite-Linux-x86_64.AppImage
+            ControlSystemsSuite-Linux-x86_64-Portable.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # 2. macOS Universal Binary (.dmg & .zip) for Older Intel + Apple Silicon Macs
   # ---------------------------------------------------------------------------
   build-macos:
     runs-on: macos-14
@@ -18,7 +111,7 @@ jobs:
       - name: Install Qt 6 (Universal Binary)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.5.3' # Supports macOS 11.0+ and Universal (x86_64 + arm64)
+          version: '6.5.3'
 
       - name: Fetch Eigen3 (Header-Only)
         run: |
@@ -57,7 +150,7 @@ jobs:
             ControlSystemsSuite-macOS-Universal-App.zip
 
   # ---------------------------------------------------------------------------
-  # 2. Windows 64-bit Standalone Executable (.zip)
+  # 3. Windows 64-bit Standalone Executable (.zip)
   # ---------------------------------------------------------------------------
   build-windows:
     runs-on: windows-latest
