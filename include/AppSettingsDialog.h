@@ -8,6 +8,7 @@ public:
     SharedSystemModel* model;
     std::function<void()> onSettingsChanged;
     std::function<void()> onResetDefaults;
+    std::function<void(int)> theme_cb;
 
     QComboBox* mode_combo;
     QSpinBox *sub1_spin, *ge1_spin;
@@ -17,10 +18,12 @@ public:
     AppSettingsDialog(SharedSystemModel* m,
                       std::function<void()> change_cb,
                       std::function<void()> reset_cb,
-                      QWidget* parent = nullptr)
+                      QWidget* parent = nullptr,
+                      std::function<void(int)> on_theme_change = nullptr)
         : QDialog(parent), model(m),
           onSettingsChanged(std::move(change_cb)),
-          onResetDefaults(std::move(reset_cb))
+          onResetDefaults(std::move(reset_cb)),
+          theme_cb(on_theme_change)
     {
         setWindowTitle("Application Settings & Precision Preferences");
         setMinimumWidth(480);
@@ -115,6 +118,46 @@ public:
         reset_row->addStretch();
         al->addLayout(reset_row);
         main_l->addWidget(app_card);
+
+        auto* theme_row = new QHBoxLayout();
+        auto* theme_lbl = new QLabel("Application Color Theme:");
+        theme_lbl->setStyleSheet(QString("color: %1; font-size: 11px; font-weight: bold; border: none;")
+                                 .arg(Theme::TEXT_SECONDARY));
+
+        auto* theme_combo = new QComboBox();
+        theme_combo->setCursor(Qt::PointingHandCursor);
+        theme_combo->addItems(Theme::themeNames());
+        theme_combo->setCurrentIndex(std::clamp(model->theme_index, 0, static_cast<int>(Theme::themeNames().size()) - 1));
+        theme_combo->setStyleSheet(QString(
+            "QComboBox {"
+            "  background-color: %1; color: %2; border: 1px solid %3;"
+            "  border-radius: 4px; padding: 4px 8px; font-weight: bold; font-size: 11px;"
+            "}"
+            "QComboBox:hover { border: 1px solid %4; }"
+            "QComboBox::drop-down { border: none; width: 18px; }"
+            "QComboBox QAbstractItemView {"
+            "  background-color: %1; color: %2; selection-background-color: %4;"
+            "  selection-color: #ffffff; border: 1px solid %3; padding: 4px; outline: 0;"
+            "}"
+        ).arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY, Theme::BORDER_INPUT, Theme::BG_KEY_ACCENT));
+
+        connect(theme_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+            if (idx >= 0) {
+                if (theme_cb) {
+                    theme_cb(idx);
+                } else {
+                    model->theme_index = idx;
+                    Theme::setTheme(idx);
+                }
+                QSettings s("ControlSuite", "UnifiedControlSuite");
+                model->saveToSettings(s);
+            }
+        });
+
+        theme_row->addWidget(theme_lbl);
+        theme_row->addStretch();
+        theme_row->addWidget(theme_combo);
+        al->addLayout(theme_row);
 
         // Bottom Close Button
         auto* bot_row = new QHBoxLayout();

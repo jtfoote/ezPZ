@@ -5,7 +5,11 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
+  # ... rest of your jobs ...
   # ---------------------------------------------------------------------------
   # 1. Linux Standalone AppImage, Portable Bundle & Start Menu Installer (x86_64)
   # ---------------------------------------------------------------------------

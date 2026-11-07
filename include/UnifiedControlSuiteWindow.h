@@ -26,13 +26,14 @@ public:
     SignalPlotterTab* sig_tab;
 
     explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite (C++17 / Qt)");
+        setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite");
         resize(900, 600);
         setStyleSheet(QString("QMainWindow { background-color: %1; }").arg(Theme::BG_WINDOW));
 
         QSettings settings("ControlSuite", "ControlSystemsSuite");
         model.loadFromSettings(settings);
-        Theme::setLightMode(model.light_mode);
+        int saved_theme = model.theme_index;
+        Theme::setTheme(0);
 
         auto* central = new QWidget(this);
         setCentralWidget(central);
@@ -107,17 +108,17 @@ public:
         nav_l->addWidget(prev_tab_btn);
         nav_l->addWidget(next_tab_btn);
 
-        auto stepTabPrev = [this]() {
-            if (!stack || stack->count() == 0) return;
-            int prev_i = (stack->currentIndex() - 1 + stack->count()) % stack->count();
-            switchTab(prev_i);
-        };
+        // auto stepTabPrev = [this]() {
+        //     if (!stack || stack->count() == 0) return;
+        //     int prev_i = (stack->currentIndex() - 1 + stack->count()) % stack->count();
+        //     switchTab(prev_i);
+        // };
 
-        auto stepTabNext = [this]() {
-            if (!stack || stack->count() == 0) return;
-            int next_i = (stack->currentIndex() + 1) % stack->count();
-            switchTab(next_i);
-        };
+        // auto stepTabNext = [this]() {
+        //     if (!stack || stack->count() == 0) return;
+        //     int next_i = (stack->currentIndex() + 1) % stack->count();
+        //     switchTab(next_i);
+        // };
 
         // Install global event filter on qApp so Alt+Left / Alt+Right always work
         if (qApp) {
@@ -163,25 +164,16 @@ public:
         });
         nav_l->addWidget(sync_btn);
 
-        auto* theme_btn = makeActionBtn(
-            model.light_mode ? "🌙" : "☀️",
-            Theme::TEXT_PRIMARY,
-            Theme::BG_PANEL_ALT
-        );
-        connect(theme_btn, &QPushButton::clicked, this, [this, theme_btn]() {
-            bool next_light = !model.light_mode;
-            applyThemeLive(next_light);
-            theme_btn->setText(next_light ? "🌙" : "☀️");
-        });
-        nav_l->addWidget(theme_btn);
-
         auto* settings_btn = makeActionBtn("⚙ Settings", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
         connect(settings_btn, &QPushButton::clicked, this, [this]() {
             auto* dlg = new AppSettingsDialog(
                 &model,
                 [this]() { refreshAllTabs(); },
                 [this]() { model.resetToDefaults(); refreshAllTabs(); },
-                this
+                this,
+                [this](int new_theme_idx) {
+                    applyThemeLive(new_theme_idx);
+                }
             );
             dlg->setAttribute(Qt::WA_DeleteOnClose);
             dlg->show();
@@ -254,7 +246,7 @@ public:
         int last_tab = std::clamp(settings.value("win/active_tab", 0).toInt(), 0, 9);
         switchTab(last_tab);
 
-        applyThemeLive(model.light_mode);
+        applyThemeLive(saved_theme, 0);
     }
 
     void activateIndependentTabState(int idx) {
@@ -316,38 +308,17 @@ public:
         routh_tab->loadFromModel();
     }
     
-    void applyThemeLive(bool light) {
-        // 1. Force canonical opposite state first so old_c is guaranteed to differ from new_c
-        //    (also ensures calling applyThemeLive(model.light_mode) at startup works properly)
-        Theme::setLightMode(!light);
-        std::vector<QString> old_c = {
-            Theme::BG_WINDOW, Theme::BG_HEADER, Theme::BG_PANEL, Theme::BG_PANEL_ALT,
-            Theme::BG_INPUT, Theme::BG_PLOT, Theme::BG_KEY_NUM, Theme::BG_KEY_FN, Theme::BG_KEY_ACCENT,
-            Theme::BORDER_PANEL, Theme::BORDER_INPUT, Theme::BORDER_FOCUS, Theme::BORDER_BTN,
-            Theme::TEXT_PRIMARY, Theme::TEXT_SECONDARY, Theme::TEXT_MUTED,
-            Theme::ACCENT_POLE, Theme::ACCENT_ZERO, Theme::ACCENT_PID, Theme::ACCENT_LOCUS,
-            Theme::ACCENT_ARROW, Theme::ACCENT_ASYMP, Theme::ACCENT_OPEN, Theme::ACCENT_IMAG,
-            Theme::BANNER_OK_BG, Theme::BANNER_OK_BD, Theme::BANNER_OK_FG,
-            Theme::BANNER_WARN_BG, Theme::BANNER_WARN_BD, Theme::BANNER_WARN_FG,
-            Theme::BANNER_ERR_BG, Theme::BANNER_ERR_BD, Theme::BANNER_ERR_FG,
-            Theme::GRID_MAJOR, Theme::AXIS_LINE
-        };
+    void applyThemeLive(int target_theme_idx, int source_theme_idx = -1) {
+        if (source_theme_idx >= 0) {
+            Theme::setTheme(source_theme_idx);
+        }
+        std::vector<QString> old_c = Theme::currentPaletteVector();
 
-        Theme::setLightMode(light);
-        model.light_mode = light;
+        Theme::setTheme(target_theme_idx);
+        model.theme_index = target_theme_idx;
+        model.light_mode  = Theme::is_light;
 
-        std::vector<QString> new_c = {
-            Theme::BG_WINDOW, Theme::BG_HEADER, Theme::BG_PANEL, Theme::BG_PANEL_ALT,
-            Theme::BG_INPUT, Theme::BG_PLOT, Theme::BG_KEY_NUM, Theme::BG_KEY_FN, Theme::BG_KEY_ACCENT,
-            Theme::BORDER_PANEL, Theme::BORDER_INPUT, Theme::BORDER_FOCUS, Theme::BORDER_BTN,
-            Theme::TEXT_PRIMARY, Theme::TEXT_SECONDARY, Theme::TEXT_MUTED,
-            Theme::ACCENT_POLE, Theme::ACCENT_ZERO, Theme::ACCENT_PID, Theme::ACCENT_LOCUS,
-            Theme::ACCENT_ARROW, Theme::ACCENT_ASYMP, Theme::ACCENT_OPEN, Theme::ACCENT_IMAG,
-            Theme::BANNER_OK_BG, Theme::BANNER_OK_BD, Theme::BANNER_OK_FG,
-            Theme::BANNER_WARN_BG, Theme::BANNER_WARN_BD, Theme::BANNER_WARN_FG,
-            Theme::BANNER_ERR_BG, Theme::BANNER_ERR_BD, Theme::BANNER_ERR_FG,
-            Theme::GRID_MAJOR, Theme::AXIS_LINE
-        };
+        std::vector<QString> new_c = Theme::currentPaletteVector();
 
         auto swapSheetStr = [&](QString ss) -> QString {
             if (ss.isEmpty()) return ss;
@@ -360,7 +331,6 @@ public:
             return ss;
         };
 
-        // 3. Update global QPalette (Fusion uses Base/Button/Highlight to draw native checkmarks & radios)
         if (qApp) {
             QPalette pal = qApp->palette();
             pal.setColor(QPalette::Window, QColor(Theme::BG_WINDOW));
@@ -376,7 +346,6 @@ public:
             pal.setColor(QPalette::Dark, QColor(Theme::BORDER_INPUT));
             qApp->setPalette(pal);
 
-            // Style only the QSlider in CSS so QCheckBox/QRadioButton keep their native Fusion checkmarks
             QString global_controls_ss = QString(
                 "QSlider::groove:horizontal { "
                 "    height: 6px; background: %1; border: 1px solid %2; border-radius: 3px; "
@@ -395,7 +364,6 @@ public:
             qApp->setStyleSheet(global_controls_ss);
         }
 
-        // 4. Swap all individual widget stylesheets and repaint
         this->setStyleSheet(swapSheetStr(this->styleSheet()));
         for (QWidget* w : this->findChildren<QWidget*>()) {
             if (!w->styleSheet().isEmpty()) {
@@ -405,6 +373,7 @@ public:
                 if (mw->bg_color.isValid() && mw->bg_color.alpha() > 0) {
                     mw->bg_color = QColor(swapSheetStr(mw->bg_color.name()));
                 }
+                mw->fg_color = QColor(swapSheetStr(mw->fg_color.name()));
             }
             w->update();
         }

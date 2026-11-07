@@ -525,11 +525,10 @@ public:
         scroll->setWidget(table_container);
         rl->addWidget(scroll, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(490);
 
         connect(source_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             if (!updating_ui) evaluateCurrent();

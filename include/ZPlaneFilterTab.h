@@ -201,11 +201,10 @@ public:
         attachSvgExportMenu(canvas, "z_plane_root_locus.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(475);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &ZPlaneFilterTab::applyPolyNumDen);
@@ -281,7 +280,7 @@ public:
                 tp_v2_edit->setText(QString::number(std::arg(zt) * 180.0 / PI, 'g', 4));
             }
             updating_ui = false;
-            evaluateCurrent(true);
+            evaluateCurrent(false);
         };
 
         loadFromModel();
@@ -314,8 +313,23 @@ public:
         try {
             auto pn = parsePolynomialInput(num_edit->text().toStdString());
             auto pd = parsePolynomialInput(den_edit->text().toStdString());
+            if (std::abs(pd.leading_gain) <= 1e-14)
+                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+            if (std::abs(pn.leading_gain) <= 1e-14)
+                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
             model->z_zeros = pn.roots;
             model->z_poles = pd.roots;
+
+            if (model->z_zeros.size() > model->z_poles.size()) {
+                poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+                poly_status_lbl->setText(QString("⚠ Improper / Non-Causal H(z): deg(Num)=%1 > deg(Den)=%2")
+                    .arg(model->z_zeros.size()).arg(model->z_poles.size()));
+            } else {
+                poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
+                poly_status_lbl->setText(QString("✔ Solved %1 z-Poles & %2 z-Zeros")
+                    .arg(model->z_poles.size()).arg(model->z_zeros.size()));
+            }
+
             poles_card->setValues(model->z_poles);
             zeros_card->setValues(model->z_zeros);
             poly_status_lbl->setText(QString("✔ Solved %1 z-Poles & %2 z-Zeros").arg(model->z_poles.size()).arg(model->z_zeros.size()));
@@ -361,13 +375,7 @@ public:
         auto loop_z_zeros = model->effectiveLoopZerosZ();
         double loop_z_gain = model->filter_gain * (model->unity_feedback_z ? 1.0 : model->hz_fb_gain);
 
-        std::string hz_ltx = formatTransferFunctionLatex(model->z_poles, model->z_zeros, model->filter_gain, "z", "H");
-        if (!model->unity_feedback_z) {
-            hz_ltx += " \\; , \\quad " + formatTransferFunctionLatex(model->hz_fb_poles, model->hz_fb_zeros, model->hz_fb_gain, "z", "H_{\\mathrm{fb}}");
-        } else {
-            hz_ltx += " \\; , \\quad H_{\\mathrm{fb}}(z) = 1";
-        }
-        tf_math_w->setLatex(QString::fromStdString(hz_ltx));
+        tf_math_w->setLatex(QString::fromStdString(fb_bar->formatActiveLatexZ(model)));
 
         Poly nz = polyScale(polyFromRoots(model->z_zeros), Complex(model->filter_gain, 0.0));
         Poly dz = polyFromRoots(model->z_poles);
@@ -426,7 +434,7 @@ public:
         canvas->zeros = loop_z_zeros;
         canvas->test_point = zt;
         canvas->is_on_rl = on_rl;
-        canvas->update();
+        canvas->repaint();
 
         if (notify) model->notify("z_plane");
     }

@@ -191,12 +191,10 @@ public:
         canvas = new BodeNyquistCanvas();
         rl->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(360);
-
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &FrequencyResponseTab::applyPolyNumDen);
         connect(num_edit, &QLineEdit::returnPressed, this, &FrequencyResponseTab::applyPolyNumDen);
@@ -269,6 +267,10 @@ public:
         try {
             auto pn = parsePolynomialInput(num_edit->text().toStdString());
             auto pd = parsePolynomialInput(den_edit->text().toStdString());
+            if (std::abs(pd.leading_gain) <= 1e-14)
+                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+            if (std::abs(pn.leading_gain) <= 1e-14)
+                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
             double ratio = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
 
             if (domain_combo->currentIndex() != 2) {

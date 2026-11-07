@@ -294,11 +294,10 @@ public:
         attachSvgExportMenu(canvas, "s_plane_root_locus.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(465);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &RootLocusTab::applyPolyNumDen);
@@ -324,7 +323,7 @@ public:
             onCoordModeSwitch(!checked);
         });
 
-        auto evalFn = [this]() { if (!updating_ui) evaluateCurrent(true); };
+        auto evalFn = [this]() { if (!updating_ui) evaluateCurrent(false); };
         connect(tp_v1_edit, &QLineEdit::textEdited, this, evalFn);
         connect(tp_v2_edit, &QLineEdit::textEdited, this, evalFn);
         connect(tol_edit,   &QLineEdit::textEdited, this, evalFn);
@@ -374,7 +373,7 @@ public:
                 tp_v2_edit->setText(QString::number(std::arg(pt) * 180.0 / PI, 'g', 4));
             }
             updating_ui = false;
-            evaluateCurrent(true);
+            evaluateCurrent(false);
         };
 
         auto updateSpecsAndK = [this]() {
@@ -539,17 +538,30 @@ public:
         try {
             auto p_num = parsePolynomialInput(num_edit->text().toStdString());
             auto p_den = parsePolynomialInput(den_edit->text().toStdString());
+            if (std::abs(p_den.leading_gain) <= 1e-14)
+                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+            if (std::abs(p_num.leading_gain) <= 1e-14)
+                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
             model->zeros = p_num.roots;
             model->poles = p_den.roots;
             double ratio = p_num.leading_gain / std::max(std::abs(p_den.leading_gain), 1e-12);
             if (std::abs(ratio) > 1e-12) model->plant_gain = ratio;
             poles_card->setValues(model->poles);
             zeros_card->setValues(model->zeros);
-            poly_status_lbl->setText(QString("✔ Auto-filled %1 Poles & %2 Zeros (K = %3)")
-                                     .arg(model->poles.size()).arg(model->zeros.size()).arg(model->plant_gain));
-            evaluateCurrent(true);
+            if (model->zeros.size() > model->poles.size()) {
+                poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+                poly_status_lbl->setText(QString("⚠ Improper G(s): deg(Num)=%1 > deg(Den)=%2 (Non-causal)")
+                    .arg(model->zeros.size()).arg(model->poles.size()));
+            } else {
+                poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
+                poly_status_lbl->setText(QString("✔ Auto-filled %1 Poles & %2 Zeros (K = %3)")
+                    .arg(model->poles.size()).arg(model->zeros.size())
+                    .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
+            }
             refreshVaryPoleCombo();
+            evaluateCurrent(true);
         } catch (const std::exception& e) {
+            poly_status_lbl->setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold; border:none;");
             poly_status_lbl->setText(QString("⚠ Polynomial error: %1").arg(e.what()));
         }
     }
@@ -586,6 +598,22 @@ public:
         auto raw_loop_poles = model->effectiveLoopPolesS();
         auto raw_loop_zeros = model->effectiveLoopZerosS();
 
+        // ---> IMPROPER CHECK (WITH AUTOMATIC CLEAR WHEN PROPER AGAIN) <---
+        if (model->zeros.size() > model->poles.size()) {
+            poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+            poly_status_lbl->setText(QString("⚠ Improper G(s): deg(Num)=%1 > deg(Den)=%2 (Non-causal in time domain)")
+                .arg(model->zeros.size()).arg(model->poles.size()));
+        } else if (raw_loop_zeros.size() > raw_loop_poles.size()) {
+            poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+            poly_status_lbl->setText(QString("⚠ Improper Loop G(s)H(s): deg(Num)=%1 > deg(Den)=%2")
+                .arg(raw_loop_zeros.size()).arg(raw_loop_poles.size()));
+        } else if (poly_status_lbl->text().startsWith("⚠ Improper")) {
+            poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::TEXT_SECONDARY));
+            poly_status_lbl->setText(QString("✔ Active: %1 Poles & %2 Zeros (K = %3)")
+                .arg(model->poles.size()).arg(model->zeros.size())
+                .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
+        }
+
         bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 && !raw_loop_poles.empty());
         int vary_idx = vary_pole_combo ? std::clamp(vary_pole_combo->currentIndex(), 0, std::max(0, static_cast<int>(raw_loop_poles.size()) - 1)) : 0;
         double fixed_k0 = edit_fixed_k0 ? std::max(0.0, parseNumericInput(edit_fixed_k0->text().toStdString(), 10.0)) : 10.0;
@@ -599,12 +627,7 @@ public:
             loop_zeros = eq.eq_zeros;
         }
 
-        std::string gs_ltx = formatTransferFunctionLatex(model->poles, model->zeros, model->plant_gain, "s", "G");
-        if (!model->unity_feedback_s) {
-            gs_ltx += " \\; , \\quad " + formatTransferFunctionLatex(model->h_poles, model->h_zeros, model->h_gain, "s", "H");
-        } else {
-            gs_ltx += " \\; , \\quad H(s) = 1";
-        }
+        std::string gs_ltx = fb_bar->formatActiveLatexS(model, false);
         if (is_pole_sweep) {
             gs_ltx += " \\; \\mathbf{[Sweep\\; p_" + std::to_string(vary_idx + 1) + " = -a \\; @ \\; K_0 = " + PRECISION.fmt(fixed_k0) + "]}";
         }
@@ -685,8 +708,7 @@ public:
             live_k_poles_lbl->setText("Tip: Click any [Ts], [Tp], [ζ], [Brk], or [jω] marker on the locus to snap Test Point s to it.");
         }
 
-        canvas->update();
+        canvas->repaint();
         if (notify) model->notify("root_locus");
     }
 };
-

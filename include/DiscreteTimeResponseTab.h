@@ -215,11 +215,10 @@ public:
         attachSvgExportMenu(canvas, "discrete_time_response.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(360);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &DiscreteTimeResponseTab::applyPolyNumDen);
@@ -326,6 +325,10 @@ public:
         try {
             auto pn = parsePolynomialInput(num_edit->text().toStdString());
             auto pd = parsePolynomialInput(den_edit->text().toStdString());
+            if (std::abs(pd.leading_gain) <= 1e-14)
+                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+            if (std::abs(pn.leading_gain) <= 1e-14)
+                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
             model->z_zeros = pn.roots;
             model->z_poles = pd.roots;
             poles_card->setValues(model->z_poles);

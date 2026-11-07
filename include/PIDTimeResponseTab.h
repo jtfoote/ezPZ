@@ -230,11 +230,10 @@ public:
         attachSvgExportMenu(canvas, "time_response.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
+        splitter->addWidget(wrapInLeftScroll(left_w, 380));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(360);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &PIDTimeResponseTab::applyPolyNumDen);
@@ -412,8 +411,24 @@ public:
         try {
             auto pn = parsePolynomialInput(num_edit->text().toStdString());
             auto pd = parsePolynomialInput(den_edit->text().toStdString());
+            if (std::abs(pd.leading_gain) <= 1e-14)
+                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+            if (std::abs(pn.leading_gain) <= 1e-14)
+                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
             model->zeros = pn.roots;
             model->poles = pd.roots;
+
+            if (model->zeros.size() > model->poles.size()) {
+                poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+                poly_status_lbl->setText(QString("⚠ Improper Plant G(s): deg(Num)=%1 > deg(Den)=%2 (Non-causal derivative action)")
+                    .arg(model->zeros.size()).arg(model->poles.size()));
+            } else {
+                poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
+                poly_status_lbl->setText(QString("✔ Solved %1 Poles & %2 Zeros (K = %3)")
+                    .arg(model->poles.size()).arg(model->zeros.size())
+                    .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
+            }
+
             double ratio = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
             if (std::abs(ratio) > 1e-12) {
                 model->plant_gain = ratio;
@@ -454,18 +469,26 @@ public:
         cfg.zeros = model->zeros;
         cfg.plant_gain = parseNumericInput(gain_edit->text().toStdString(), 1.0);
 
+        // ---> IMPROPER TRANSFER FUNCTION CHECK (WITH AUTO-CLEAR) <---
+        bool is_improper = (cfg.zeros.size() > cfg.poles.size());
+        if (is_improper) {
+            poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+            poly_status_lbl->setText(QString("⚠ Improper Plant G(s): deg(Num)=%1 > deg(Den)=%2 (Non-causal in time domain)")
+                .arg(cfg.zeros.size()).arg(cfg.poles.size()));
+        } else if (poly_status_lbl->text().startsWith("⚠ Improper")) {
+            poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::TEXT_SECONDARY));
+            poly_status_lbl->setText(QString("✔ Active: %1 Poles & %2 Zeros (K = %3)")
+                .arg(cfg.poles.size()).arg(cfg.zeros.size())
+                .arg(QString::fromStdString(PRECISION.fmt(cfg.plant_gain))));
+        }
+        // ---> END IMPROPER CHECK <---
+
         cfg.unity_feedback = model->unity_feedback_s;
         cfg.h_poles = model->h_poles;
         cfg.h_zeros = model->h_zeros;
         cfg.h_gain  = model->h_gain;
 
-        std::string gs_ltx = formatTransferFunctionLatex(model->poles, model->zeros, cfg.plant_gain, "s", "G");
-        if (!model->unity_feedback_s) {
-            gs_ltx += " \\; , \\quad " + formatTransferFunctionLatex(model->h_poles, model->h_zeros, model->h_gain, "s", "H");
-        } else {
-            gs_ltx += " \\; , \\quad H(s) = 1";
-        }
-        tf_math_w->setLatex(QString::fromStdString(gs_ltx));
+        tf_math_w->setLatex(QString::fromStdString(fb_bar->formatActiveLatexS(model, true)));
         cfg.input_magnitude = parseNumericInput(mag_edit->text().toStdString(), 1.0);
 
         int mode_idx = loop_mode_combo->currentIndex();
@@ -493,19 +516,23 @@ public:
             model->notify("pid_sim");
         }
 
-        // Style Compact Full-Width Stability Banner (Green when Stable, Orange when Marginal/Unstable!)
+        // Style Compact Full-Width Stability Banner (Turns Amber if Improper OR Marginal/Unstable!)
         bool is_stable = (res.stability_state == "STABLE");
-        QString bg = is_stable ? Theme::BANNER_OK_BG : Theme::BANNER_WARN_BG;
-        QString bd = is_stable ? Theme::BANNER_OK_BD : Theme::BANNER_WARN_BD;
-        QString fg = is_stable ? Theme::BANNER_OK_FG : Theme::BANNER_WARN_FG;
+        bool banner_ok = is_stable && !is_improper;
+        QString bg = banner_ok ? Theme::BANNER_OK_BG : Theme::BANNER_WARN_BG;
+        QString bd = banner_ok ? Theme::BANNER_OK_BD : Theme::BANNER_WARN_BD;
+        QString fg = banner_ok ? Theme::BANNER_OK_FG : Theme::BANNER_WARN_FG;
         QString mode_tag = !cfg.closed_loop ? "Open-Loop" : (cfg.pid_enabled ? "CL (PID ON)" : "CL (PID OFF, C=1)");
+        if (is_improper) {
+            mode_tag += QString(" • ⚠ IMPROPER G(s) (%1>%2)").arg(cfg.zeros.size()).arg(cfg.poles.size());
+        }
 
         status_banner->setStyleSheet(QString("QFrame { background-color: %1; border: 1.5px solid %2; border-radius: 5px; }").arg(bg, bd));
         status_title_lbl->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border: none;").arg(fg));
         status_right_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; font-size: 11px; border: none;").arg(Theme::TEXT_PRIMARY));
 
         status_title_lbl->setText(QString("%1 %2 • %3 • %4")
-            .arg(is_stable ? "✔" : "⚠")
+            .arg(banner_ok ? "✔" : "⚠")
             .arg(QString::fromStdString(res.stability_state))
             .arg(mode_tag)
             .arg(QString::fromStdString(res.damping_regime)));

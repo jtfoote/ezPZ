@@ -47,8 +47,10 @@ target_link_libraries(control_systems_suite PRIVATE
     Eigen3::Eigen
 )
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(control_systems_suite PRIVATE -O3 -Wall -Wextra -Wno-unused-lambda-capture)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(control_systems_suite PRIVATE -O3 -Wall -Wextra)
 elseif(MSVC)
     target_compile_options(control_systems_suite PRIVATE /O2 /W3 /utf-8 /permissive-)
 endif()

@@ -12,6 +12,9 @@ public:
 
     std::vector<Complex> poles;
     std::vector<Complex> zeros;
+    std::vector<Complex> cached_poles;
+    std::vector<Complex> cached_zeros;
+    std::vector<std::vector<Complex>> cached_branches;
     Complex test_point = {-2.0, 2.0};
     bool is_on_rl = true;
 
@@ -165,6 +168,8 @@ protected:
         enforceAspectRatio();
 
         QPainter p(this);
+        QColor badge_bg(Theme::BG_PANEL);
+        badge_bg.setAlpha(235);
         p.setRenderHint(QPainter::Antialiasing, true);
         p.fillRect(rect(), QColor(Theme::BG_PLOT));
 
@@ -258,7 +263,12 @@ protected:
 
         // Root Locus Branches + Directional Arrows (➤)
         if (show_locus) {
-            auto branches = computeRootLocusBranches(poles, zeros, 180);
+            if (poles != cached_poles || zeros != cached_zeros) {
+                cached_poles = poles;
+                cached_zeros = zeros;
+                cached_branches = computeRootLocusBranches(poles, zeros);
+            }
+            const auto& branches = cached_branches;
             double max_jump = std::max(width(), height()) * 0.45;
             for (const auto& br : branches) {
                 QPainterPath path;
@@ -437,11 +447,12 @@ protected:
                         .arg(QString::fromStdString(PRECISION.fmt(ix.wn)));
                     QFontMetrics fm(p.font());
                     int tw = fm.horizontalAdvance(txt) + 10;
+                    QColor fg_col = Theme::is_light ? ix.color.darker(135) : ix.color;
                     QRectF box(ipx.x() + 8, ipx.y() - 20, tw, 18);
-                    p.setBrush(QColor(13, 17, 26, 230));
-                    p.setPen(QPen(ix.color, 1.1));
+                    p.setBrush(badge_bg);
+                    p.setPen(QPen(fg_col, 1.1));
                     p.drawRoundedRect(box, 3, 3);
-                    p.setPen(ix.color);
+                    p.setPen(fg_col);
                     p.drawText(box, Qt::AlignCenter, txt);
                 }
             }
@@ -579,14 +590,15 @@ protected:
                               .arg(QString::fromStdString(PRECISION.fmt(cp.pt.real())))
                               .arg(QString::fromStdString(PRECISION.fmt(cp.gain_k)));
 
+                    QColor fg_col = Theme::is_light ? cp.color.darker(135) : cp.color;
                     QFontMetrics fm(p.font());
                     int tw = fm.horizontalAdvance(txt) + 10;
                     double y_off = (cp.label_tag == "jω") ? -22.0 : 10.0;
                     QRectF box(cpx.x() + 8, cpx.y() + y_off, tw, 18);
-                    p.setBrush(QColor(13, 17, 26, 230));
-                    p.setPen(QPen(cp.color, 1.1));
+                    p.setBrush(badge_bg);
+                    p.setPen(QPen(fg_col, 1.1));
                     p.drawRoundedRect(box, 3, 3);
-                    p.setPen(cp.color);
+                    p.setPen(fg_col);
                     p.drawText(box, Qt::AlignCenter, txt);
                 }
             }
@@ -726,7 +738,7 @@ protected:
                 double by = far_px.y() + (uy >= 0.0 ? 2.0 : -18.0);
                 QRectF box(bx, by, tw, 17);
 
-                p.setBrush(QColor(13, 17, 26, 225));
+                p.setBrush(badge_bg);
                 p.setPen(QPen(col, 1.0));
                 p.drawRoundedRect(box, 3, 3);
                 p.setPen(col);

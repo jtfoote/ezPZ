@@ -14,7 +14,8 @@ static constexpr double PI = 3.14159265358979323846;
 // Unified Modern Dark-Slate Engineering Theme
 // =============================================================================
 namespace Theme {
-    inline bool is_light          = false;
+    inline int current_theme = 0;
+    inline bool is_light     = false;
 
     inline QString BG_WINDOW      = "#0b0e14";
     inline QString BG_HEADER      = "#080b10";
@@ -59,95 +60,165 @@ namespace Theme {
     inline QString GRID_MAJOR     = "#1a2233";
     inline QString AXIS_LINE      = "#3b4963";
 
-    inline void setLightMode(bool light) {
-        is_light = light;
-        if (light) {
-            BG_WINDOW      = "#f1f5f8";
-            BG_HEADER      = "#e2e8ef";
-            BG_PANEL       = "#ffffff";
-            BG_PANEL_ALT   = "#f8fafc";
-            BG_INPUT       = "#fffffe";
-            BG_PLOT        = "#fcfdff";
-            BG_KEY_NUM     = "#e2e8f0";
-            BG_KEY_FN      = "#edf2f7";
+    inline QStringList themeNames() {
+        return {
+            "🌙 Midnight Slate (Default Dark)",
+            "☀️ Crisp Daylight (Light)",
+            "☕ Catppuccin Mocha",
+            "❄️ Nord Polar",
+            "🌲 Gruvbox Retro Dark",
+            "📜 Solarized Paper (Warm Light)"
+        };
+    }
+
+    inline std::vector<QString> currentPaletteVector() {
+        return {
+            BG_WINDOW, BG_HEADER, BG_PANEL, BG_PANEL_ALT,
+            BG_INPUT, BG_PLOT, BG_KEY_NUM, BG_KEY_FN, BG_KEY_ACCENT,
+            BORDER_PANEL, BORDER_INPUT, BORDER_FOCUS, BORDER_BTN,
+            TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+            ACCENT_POLE, ACCENT_ZERO, ACCENT_PID, ACCENT_LOCUS,
+            ACCENT_ARROW, ACCENT_ASYMP, ACCENT_OPEN, ACCENT_IMAG,
+            BANNER_OK_BG, BANNER_OK_BD, BANNER_OK_FG,
+            BANNER_WARN_BG, BANNER_WARN_BD, BANNER_WARN_FG,
+            BANNER_ERR_BG, BANNER_ERR_BD, BANNER_ERR_FG,
+            GRID_MAJOR, AXIS_LINE
+        };
+    }
+
+    inline void setTheme(int idx) {
+        current_theme = idx;
+        is_light = (idx == 1 || idx == 5);
+
+        switch (idx) {
+        case 1: // ☀️ Crisp Daylight (Light)
+            BG_WINDOW      = "#f1f5f8"; BG_HEADER      = "#e2e8ef";
+            BG_PANEL       = "#ffffff"; BG_PANEL_ALT   = "#f8fafc";
+            BG_INPUT       = "#fffffe"; BG_PLOT        = "#fcfdff";
+            BG_KEY_NUM     = "#e2e8f0"; BG_KEY_FN      = "#edf2f7";
             BG_KEY_ACCENT  = "#0284c8";
-
-            BORDER_PANEL   = "#cbd5e0";
-            BORDER_INPUT   = "#94a3b7";
-            BORDER_FOCUS   = "#0369a1";
-            BORDER_BTN     = "#64748a";
-
-            TEXT_PRIMARY   = "#0f172a";
-            TEXT_SECONDARY = "#334154";
+            BORDER_PANEL   = "#cbd5e0"; BORDER_INPUT   = "#94a3b7";
+            BORDER_FOCUS   = "#0369a1"; BORDER_BTN     = "#64748a";
+            TEXT_PRIMARY   = "#0f172a"; TEXT_SECONDARY = "#334154";
             TEXT_MUTED     = "#475569";
+            ACCENT_POLE    = "#dc2626"; ACCENT_ZERO    = "#0284c7";
+            ACCENT_PID     = "#059669"; ACCENT_LOCUS   = "#7c3aed";
+            ACCENT_ARROW   = "#d97706"; ACCENT_ASYMP   = "#0891b2";
+            ACCENT_OPEN    = "#ea580c"; ACCENT_IMAG    = "#db2777";
+            BANNER_OK_BG   = "#dcfce7"; BANNER_OK_BD   = "#16a34a"; BANNER_OK_FG   = "#15803d";
+            BANNER_WARN_BG = "#fef3c7"; BANNER_WARN_BD = "#d97706"; BANNER_WARN_FG = "#b45309";
+            BANNER_ERR_BG  = "#fee2e2"; BANNER_ERR_BD  = "#dc2626"; BANNER_ERR_FG  = "#b91c1c";
+            GRID_MAJOR     = "#e2e8f1"; AXIS_LINE      = "#94a3b9";
+            break;
 
-            ACCENT_POLE    = "#dc2626";
-            ACCENT_ZERO    = "#0284c7";
-            ACCENT_PID     = "#059669";
-            ACCENT_LOCUS   = "#7c3aed";
-            ACCENT_ARROW   = "#d97706";
-            ACCENT_ASYMP   = "#0891b2";
-            ACCENT_OPEN    = "#ea580c";
-            ACCENT_IMAG    = "#db2777";
+        case 2: // ☕ Catppuccin Mocha
+            BG_WINDOW      = "#1e1e2e"; BG_HEADER      = "#11111b";
+            BG_PANEL       = "#181825"; BG_PANEL_ALT   = "#313244";
+            BG_INPUT       = "#141420"; BG_PLOT        = "#191926";
+            BG_KEY_NUM     = "#45475a"; BG_KEY_FN      = "#313245";
+            BG_KEY_ACCENT  = "#89b4fa";
+            BORDER_PANEL   = "#45475b"; BORDER_INPUT   = "#585b70";
+            BORDER_FOCUS   = "#74c7ec"; BORDER_BTN     = "#6c7086";
+            TEXT_PRIMARY   = "#cdd6f4"; TEXT_SECONDARY = "#bac2de";
+            TEXT_MUTED     = "#a6adc8";
+            ACCENT_POLE    = "#f38ba8"; ACCENT_ZERO    = "#89dceb";
+            ACCENT_PID     = "#a6e3a1"; ACCENT_LOCUS   = "#cba6f7";
+            ACCENT_ARROW   = "#f9e2af"; ACCENT_ASYMP   = "#94e2d5";
+            ACCENT_OPEN    = "#fab387"; ACCENT_IMAG    = "#f5c2e7";
+            BANNER_OK_BG   = "#1e3a2f"; BANNER_OK_BD   = "#a6e3a2"; BANNER_OK_FG   = "#a6e3a3";
+            BANNER_WARN_BG = "#3b3222"; BANNER_WARN_BD = "#f9e2ae"; BANNER_WARN_FG = "#f9e2ad";
+            BANNER_ERR_BG  = "#3c232e"; BANNER_ERR_BD   = "#f38ba7"; BANNER_ERR_FG  = "#f38ba6";
+            GRID_MAJOR     = "#2a2b3d"; AXIS_LINE      = "#585b71";
+            break;
 
-            BANNER_OK_BG   = "#dcfce7";
-            BANNER_OK_BD   = "#16a34a";
-            BANNER_OK_FG   = "#15803d";
+        case 3: // ❄️ Nord Polar
+            BG_WINDOW      = "#2e3440"; BG_HEADER      = "#242933";
+            BG_PANEL       = "#3b4252"; BG_PANEL_ALT   = "#434c5e";
+            BG_INPUT       = "#292e39"; BG_PLOT        = "#2b303c";
+            BG_KEY_NUM     = "#4c566a"; BG_KEY_FN      = "#3f4758";
+            BG_KEY_ACCENT  = "#5e81ac";
+            BORDER_PANEL   = "#4c566b"; BORDER_INPUT   = "#576279";
+            BORDER_FOCUS   = "#88c0d0"; BORDER_BTN     = "#616e88";
+            TEXT_PRIMARY   = "#eceff4"; TEXT_SECONDARY = "#e5e9f0";
+            TEXT_MUTED     = "#d8dee9";
+            ACCENT_POLE    = "#bf616a"; ACCENT_ZERO    = "#88c0d1";
+            ACCENT_PID     = "#a3be8c"; ACCENT_LOCUS   = "#b48ead";
+            ACCENT_ARROW   = "#ebcb8b"; ACCENT_ASYMP   = "#8fbcbb";
+            ACCENT_OPEN    = "#d08770"; ACCENT_IMAG    = "#c997c0";
+            BANNER_OK_BG   = "#2d3b32"; BANNER_OK_BD   = "#a3be8d"; BANNER_OK_FG   = "#b5d19c";
+            BANNER_WARN_BG = "#3f382b"; BANNER_WARN_BD = "#ebcb8c"; BANNER_WARN_FG = "#f0d49a";
+            BANNER_ERR_BG  = "#422b30"; BANNER_ERR_BD  = "#bf616b"; BANNER_ERR_FG  = "#d57780";
+            GRID_MAJOR     = "#363d4c"; AXIS_LINE      = "#616e87";
+            break;
 
-            BANNER_WARN_BG = "#fef3c7";
-            BANNER_WARN_BD = "#d97706";
-            BANNER_WARN_FG = "#b45309";
+        case 4: // 🌲 Gruvbox Retro Dark
+            BG_WINDOW      = "#1d2021"; BG_HEADER      = "#141617";
+            BG_PANEL       = "#282828"; BG_PANEL_ALT   = "#32302f";
+            BG_INPUT       = "#181a1b"; BG_PLOT        = "#1b1d1e";
+            BG_KEY_NUM     = "#504945"; BG_KEY_FN      = "#3c3836";
+            BG_KEY_ACCENT  = "#458588";
+            BORDER_PANEL   = "#504946"; BORDER_INPUT   = "#665c54";
+            BORDER_FOCUS   = "#83a598"; BORDER_BTN     = "#7c6f64";
+            TEXT_PRIMARY   = "#fbf1c7"; TEXT_SECONDARY = "#ebdbb2";
+            TEXT_MUTED     = "#bdae93";
+            ACCENT_POLE    = "#fb4934"; ACCENT_ZERO    = "#83a599";
+            ACCENT_PID     = "#b8bb26"; ACCENT_LOCUS   = "#d3869b";
+            ACCENT_ARROW   = "#fabd2f"; ACCENT_ASYMP   = "#8ec07c";
+            ACCENT_OPEN    = "#fe8019"; ACCENT_IMAG    = "#d65d0e";
+            BANNER_OK_BG   = "#2c341d"; BANNER_OK_BD   = "#98971a"; BANNER_OK_FG   = "#b8bb27";
+            BANNER_WARN_BG = "#3d311a"; BANNER_WARN_BD = "#d79921"; BANNER_WARN_FG = "#fabd2e";
+            BANNER_ERR_BG  = "#3c1f1e"; BANNER_ERR_BD  = "#cc241d"; BANNER_ERR_FG  = "#fb4935";
+            GRID_MAJOR     = "#2e2c2b"; AXIS_LINE      = "#665c55";
+            break;
 
-            BANNER_ERR_BG  = "#fee2e2";
-            BANNER_ERR_BD  = "#dc2626";
-            BANNER_ERR_FG  = "#b91c1c";
+        case 5: // 📜 Solarized Paper (Warm Light)
+            BG_WINDOW      = "#fdf6e3"; BG_HEADER      = "#eee8d5";
+            BG_PANEL       = "#faf3e0"; BG_PANEL_ALT   = "#f2ecda";
+            BG_INPUT       = "#fffdf7"; BG_PLOT        = "#fefbf1";
+            BG_KEY_NUM     = "#e6dfcc"; BG_KEY_FN      = "#ede6d3";
+            BG_KEY_ACCENT  = "#268bd2";
+            BORDER_PANEL   = "#d5ceb9"; BORDER_INPUT   = "#b8b19d";
+            BORDER_FOCUS   = "#268bd3"; BORDER_BTN     = "#93a1a1";
+            TEXT_PRIMARY   = "#073642"; TEXT_SECONDARY = "#586e75";
+            TEXT_MUTED     = "#657b83";
+            ACCENT_POLE    = "#dc322f"; ACCENT_ZERO    = "#268bd4";
+            ACCENT_PID     = "#859900"; ACCENT_LOCUS   = "#6c71c4";
+            ACCENT_ARROW   = "#b58900"; ACCENT_ASYMP   = "#2aa198";
+            ACCENT_OPEN    = "#cb4b16"; ACCENT_IMAG    = "#d33682";
+            BANNER_OK_BG   = "#e9f2d5"; BANNER_OK_BD   = "#859901"; BANNER_OK_FG   = "#5f6e00";
+            BANNER_WARN_BG = "#f9edd0"; BANNER_WARN_BD = "#b58901"; BANNER_WARN_FG = "#8c6900";
+            BANNER_ERR_BG  = "#f9dedd"; BANNER_ERR_BD  = "#dc322e"; BANNER_ERR_FG  = "#a8201d";
+            GRID_MAJOR     = "#eae3cf"; AXIS_LINE      = "#93a1a2";
+            break;
 
-            GRID_MAJOR     = "#e2e8f1";
-            AXIS_LINE      = "#94a3b9";
-        } else {
-            BG_WINDOW      = "#0b0e14";
-            BG_HEADER      = "#080b10";
-            BG_PANEL       = "#121722";
-            BG_PANEL_ALT   = "#171e2b";
-            BG_INPUT       = "#090d16";
-            BG_PLOT        = "#0d111a";
-            BG_KEY_NUM     = "#1e2636";
-            BG_KEY_FN      = "#182030";
+        case 0: // 🌙 Midnight Slate (Default Dark)
+        default:
+            current_theme  = 0;
+            is_light       = false;
+            BG_WINDOW      = "#0b0e14"; BG_HEADER      = "#080b10";
+            BG_PANEL       = "#121722"; BG_PANEL_ALT   = "#171e2b";
+            BG_INPUT       = "#090d16"; BG_PLOT        = "#0d111a";
+            BG_KEY_NUM     = "#1e2636"; BG_KEY_FN      = "#182030";
             BG_KEY_ACCENT  = "#0369a2";
-
-            BORDER_PANEL   = "#1f293d";
-            BORDER_INPUT   = "#2b364f";
-            BORDER_FOCUS   = "#0284c7";
-            BORDER_BTN     = "#334155";
-
-            TEXT_PRIMARY   = "#f1f5f9";
-            TEXT_SECONDARY = "#cbd5e1";
+            BORDER_PANEL   = "#1f293d"; BORDER_INPUT   = "#2b364f";
+            BORDER_FOCUS   = "#0284c7"; BORDER_BTN     = "#334155";
+            TEXT_PRIMARY   = "#f1f5f9"; TEXT_SECONDARY = "#cbd5e1";
             TEXT_MUTED     = "#94a3b8";
-
-            ACCENT_POLE    = "#f87171";
-            ACCENT_ZERO    = "#38bdf8";
-            ACCENT_PID     = "#34d399";
-            ACCENT_LOCUS   = "#c084fc";
-            ACCENT_ARROW   = "#facc15";
-            ACCENT_ASYMP   = "#22d3ee";
-            ACCENT_OPEN    = "#fb923c";
-            ACCENT_IMAG    = "#f472b6";
-
-            BANNER_OK_BG   = "#062e22";
-            BANNER_OK_BD   = "#10b981";
-            BANNER_OK_FG   = "#34d399";
-
-            BANNER_WARN_BG = "#332407";
-            BANNER_WARN_BD = "#f59e0b";
-            BANNER_WARN_FG = "#fbbf24";
-
-            BANNER_ERR_BG  = "#361117";
-            BANNER_ERR_BD  = "#ef4444";
-            BANNER_ERR_FG  = "#f87171";
-
-            GRID_MAJOR     = "#1a2233";
-            AXIS_LINE      = "#3b4963";
+            ACCENT_POLE    = "#f87171"; ACCENT_ZERO    = "#38bdf8";
+            ACCENT_PID     = "#34d399"; ACCENT_LOCUS   = "#c084fc";
+            ACCENT_ARROW   = "#facc15"; ACCENT_ASYMP   = "#22d3ee";
+            ACCENT_OPEN    = "#fb923c"; ACCENT_IMAG    = "#f472b6";
+            BANNER_OK_BG   = "#062e22"; BANNER_OK_BD   = "#10b981"; BANNER_OK_FG   = "#34d399";
+            BANNER_WARN_BG = "#332407"; BANNER_WARN_BD = "#f59e0b"; BANNER_WARN_FG = "#fbbf24";
+            BANNER_ERR_BG  = "#361117"; BANNER_ERR_BD  = "#ef4444"; BANNER_ERR_FG  = "#f87171";
+            GRID_MAJOR     = "#1a2233"; AXIS_LINE      = "#3b4963";
+            break;
         }
+    }
+
+    // Backwards-compatible helper so exportWidgetToSvg still works seamlessly
+    inline void setLightMode(bool light) {
+        setTheme(light ? 1 : 0);
     }
 }
 
@@ -162,9 +233,9 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     if (path.isEmpty()) return;
     if (!path.endsWith(".svg", Qt::CaseInsensitive)) path += ".svg";
 
-    bool prev_light = Theme::is_light;
+    int prev_theme = Theme::current_theme;
     if (force_light_theme) {
-        Theme::setLightMode(true);
+        Theme::setTheme(1); // Crisp Daylight for note exports
     }
 
     QSvgGenerator generator;
@@ -176,7 +247,7 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     canvas->render(&generator);
 
     if (force_light_theme) {
-        Theme::setLightMode(prev_light);
+        Theme::setTheme(prev_theme);
         canvas->update();
     }
 }
@@ -344,12 +415,10 @@ public:
     void setLatex(const QString& ltx) {
         raw_latex = ltx;
         root_node = parseSegment(cleanLatexTop(raw_latex.toStdString()));
-        QFont f("Serif", base_pt, QFont::Bold);
-        f.setStyleHint(QFont::Times);
-        QFontMetricsF fm(f);
+        QFont f = makeLatexBaseFont(base_pt + 1);
         auto m = measureNode(root_node, f);
-        cached_size = QSize(static_cast<int>( std::ceil(m.w + 12) ),
-                            static_cast<int>( std::ceil(std::max(m.asc + m.desc + 8.0, 24.0)) ));
+        cached_size = QSize(static_cast<int>(std::ceil(m.w + 16.0)),
+                            static_cast<int>(std::ceil(std::max(m.asc + m.desc + 8.0, 24.0))));
         setMinimumHeight(cached_size.height());
         updateGeometry();
         update();
@@ -370,8 +439,88 @@ protected:
         double desc = 4.0;
     };
 
+    struct StyledSpan {
+        QString text;
+        bool italic = false;
+        double pre_pad = 0.0;
+        double post_pad = 0.0;
+    };
+
     MathNode root_node;
     QSize cached_size = QSize(100, 28);
+
+    static QFont makeLatexBaseFont(int pt_size) {
+        QFont f;
+        f.setFamilies({
+            "Latin Modern Math", "Latin Modern Roman", "CMU Serif",
+            "STIX Two Math", "STIXGeneral", "Cambria Math",
+            "Century Schoolbook L", "DejaVu Serif", "Liberation Serif", "Times New Roman", "Serif"
+        });
+        f.setPointSizeF(pt_size);
+        f.setWeight(QFont::Normal);
+        f.setStyleHint(QFont::Times, QFont::PreferAntialias);
+        return f;
+    }
+
+    static std::vector<StyledSpan> tokenizeMathText(const QString& s, double em_px) {
+        std::vector<StyledSpan> spans;
+        static const std::vector<QString> upright_words = {
+            "sin", "cos", "tan", "sec", "csc", "cot", "arcsin", "arccos", "arctan",
+            "sinh", "cosh", "tanh", "ln", "log", "exp", "lim", "max", "min", "arg",
+            "Re", "Im", "det", "rad", "deg", "dB", "OS", "ss", "eval", "sym",
+            "ol", "cl", "pos", "vel", "fb", "test", "RL", "Uncompensated", "None"
+        };
+
+        int n = s.length();
+        int i = 0;
+        while (i < n) {
+            QChar c = s[i];
+            if (c.isSpace()) {
+                spans.push_back({" ", false, 0.0, 0.0});
+                while (i < n && s[i].isSpace()) ++i;
+            } else if (c.isLetter()) {
+                int st = i;
+                while (i < n && s[i].isLetter()) ++i;
+                QString word = s.mid(st, i - st);
+                bool use_italic = true;
+                if (word.length() > 1 &&
+                    std::find(upright_words.begin(), upright_words.end(), word) != upright_words.end()) {
+                    use_italic = false;
+                }
+                // Greek uppercase (Δ, Ω, Σ, Π) stay upright; lowercase Greek & Latin variables are italic
+                if (word.length() == 1 && word[0].unicode() >= 0x0391 && word[0].unicode() <= 0x03A9) {
+                    use_italic = false;
+                }
+                spans.push_back({word, use_italic, 0.0, use_italic ? 0.03 * em_px : 0.0});
+            } else if (c.isDigit() || c == '.') {
+                int st = i;
+                while (i < n && (s[i].isDigit() || s[i] == '.')) ++i;
+                spans.push_back({s.mid(st, i - st), false, 0.0, 0.0});
+            } else if (c == '+' || c == '-' || c == QChar(0x2212)) {
+                bool is_unary = spans.empty();
+                if (!is_unary) {
+                    QString prev = spans.back().text.trimmed();
+                    if (prev.endsWith("(") || prev.endsWith("[") || prev.endsWith("=") || prev.endsWith(","))
+                        is_unary = true;
+                }
+                QString sym = (c == '-') ? QString(QChar(0x2212)) : QString(c); // True Unicode Minus U+2212
+                double pad = is_unary ? (0.04 * em_px) : (0.20 * em_px);
+                spans.push_back({sym, false, is_unary ? 0.0 : pad, pad});
+                ++i;
+            } else if (c == '=') {
+                spans.push_back({"=", false, 0.24 * em_px, 0.24 * em_px});
+                ++i;
+            } else if (c == ',') {
+                spans.push_back({",", false, 0.0, 0.20 * em_px});
+                ++i;
+            } else {
+                bool is_greek_lower = (c.unicode() >= 0x03B1 && c.unicode() <= 0x03C9);
+                spans.push_back({QString(c), is_greek_lower, 0.0, 0.0});
+                ++i;
+            }
+        }
+        return spans;
+    }
 
     static std::string cleanLatexTop(std::string s) {
         while (!s.empty() && (s.front() == ' ' || s.front() == '$')) s.erase(s.begin());
@@ -422,7 +571,6 @@ protected:
             }
             return {s.substr(start), s.size()};
         }
-        // Single UTF-8 character or token
         size_t start = i;
         unsigned char c = static_cast<unsigned char>(s[i]);
         if (c >= 0x80) {
@@ -481,7 +629,6 @@ protected:
                 }
             } else if (s[i] == '^' || s[i] == '_') {
                 char kind = s[i++];
-                // Attach to last single char of cur_txt if available
                 MathNode base_node;
                 if (!cur_txt.empty()) {
                     size_t char_start = cur_txt.size() - 1;
@@ -504,8 +651,6 @@ protected:
                     if (pos < s.size() && s[pos] == '{') {
                         return extractGroup(s, pos);
                     }
-                    // For unbraced '_' (e.g. s_test), consume the full alphanumeric token;
-                    // for unbraced '^' (e.g. s^2 or 10^-3), consume digits/sign or single char.
                     size_t st = pos;
                     if (kind == '_') {
                         while (pos < s.size() && std::isalnum(static_cast<unsigned char>(s[pos]))) ++pos;
@@ -523,9 +668,9 @@ protected:
 
                 if (i < s.size() && ((kind == '^' && s[i] == '_') || (kind == '_' && s[i] == '^'))) {
                     char kind2 = s[i++];
-                    std::swap(kind, kind2); // Use kind2's rule inside extractScriptArg
+                    std::swap(kind, kind2);
                     auto [script2_s, i2] = extractScriptArg(i);
-                    std::swap(kind, kind2); // Restore original kind
+                    std::swap(kind, kind2);
                     i = i2;
                     MathNode sc2_node = parseSegment(script2_s);
                     MathNode ss; ss.type = MathNode::SUPSUB;
@@ -539,7 +684,7 @@ protected:
                     sn.children.push_back(base_node);
                     sn.children.push_back(sc_node);
                     seq.children.push_back(sn);
-                } 
+                }
             } else if (s[i] == '{' || s[i] == '}') {
                 ++i;
             } else if (s[i] == '\\') {
@@ -561,8 +706,16 @@ protected:
     NodeMetrics measureNode(const MathNode& n, const QFont& f) const {
         QFontMetricsF fm(f);
         switch (n.type) {
-            case MathNode::TEXT:
-                return {fm.horizontalAdvance(n.text), fm.ascent(), fm.descent()};
+            case MathNode::TEXT: {
+                QFont f_it = f; f_it.setItalic(true);
+                QFontMetricsF fm_it(f_it);
+                double w = 0.0;
+                auto spans = tokenizeMathText(n.text, fm.height());
+                for (const auto& sp : spans) {
+                    w += sp.pre_pad + (sp.italic ? fm_it.horizontalAdvance(sp.text) : fm.horizontalAdvance(sp.text)) + sp.post_pad;
+                }
+                return {w, fm.ascent(), fm.descent()};
+            }
             case MathNode::SEQ: {
                 double w = 0.0, asc = fm.ascent(), desc = fm.descent();
                 for (const auto& c : n.children) {
@@ -574,13 +727,14 @@ protected:
                 return {w, asc, desc};
             }
             case MathNode::FRAC: {
-                QFont sf = shrinkFont(f, 0.85);
+                QFont sf = shrinkFont(f, 0.90);
                 auto nm = measureNode(n.children[0], sf);
                 auto dm = measureNode(n.children[1], sf);
-                double w = std::max(nm.w, dm.w) + 10.0;
-                double axis = fm.ascent() * 0.38;
-                double asc = axis + nm.asc + nm.desc + 3.0;
-                double desc = std::max(0.0, (dm.asc + dm.desc + 3.0) - axis);
+                double w = std::max(nm.w, dm.w) + 12.0;
+                double axis = fm.ascent() * 0.34;
+                double gap = 3.5;
+                double asc = axis + nm.asc + nm.desc + gap;
+                double desc = std::max(0.0, (dm.asc + dm.desc + gap) - axis);
                 return {w, asc, desc};
             }
             case MathNode::SQRT: {
@@ -589,49 +743,61 @@ protected:
             }
             case MathNode::SUP: {
                 auto bm = measureNode(n.children[0], f);
-                auto sm = measureNode(n.children[1], shrinkFont(f, 0.74));
-                return {bm.w + sm.w + 1.5, std::max(bm.asc, bm.asc * 0.55 + sm.asc + sm.desc), bm.desc};
+                auto sm = measureNode(n.children[1], shrinkFont(f, 0.72));
+                return {bm.w + sm.w + 1.5, std::max(bm.asc, bm.asc * 0.52 + sm.asc + sm.desc), bm.desc};
             }
             case MathNode::SUB: {
                 auto bm = measureNode(n.children[0], f);
-                auto sm = measureNode(n.children[1], shrinkFont(f, 0.74));
-                return {bm.w + sm.w + 1.5, bm.asc, std::max(bm.desc, bm.desc * 0.4 + sm.asc + sm.desc)};
+                auto sm = measureNode(n.children[1], shrinkFont(f, 0.72));
+                return {bm.w + sm.w + 1.5, bm.asc, std::max(bm.desc, bm.desc * 0.35 + sm.asc + sm.desc)};
             }
             case MathNode::SUPSUB: {
                 auto bm = measureNode(n.children[0], f);
-                QFont sf = shrinkFont(f, 0.74);
+                QFont sf = shrinkFont(f, 0.72);
                 auto supm = measureNode(n.children[1], sf);
                 auto subm = measureNode(n.children[2], sf);
                 return {bm.w + std::max(supm.w, subm.w) + 2.0,
-                        std::max(bm.asc, bm.asc * 0.55 + supm.asc + supm.desc),
-                        std::max(bm.desc, bm.desc * 0.4 + subm.asc + subm.desc)};
+                        std::max(bm.asc, bm.asc * 0.52 + supm.asc + supm.desc),
+                        std::max(bm.desc, bm.desc * 0.35 + subm.asc + subm.desc)};
             }
         }
         return {0, 10, 4};
     }
 
     double drawNode(QPainter& p, const MathNode& n, double x, double y_base, const QFont& f) const {
-        p.setFont(f);
         QFontMetricsF fm(f);
         switch (n.type) {
-            case MathNode::TEXT:
-                p.drawText(QPointF(x, y_base), n.text);
-                return fm.horizontalAdvance(n.text);
+            case MathNode::TEXT: {
+                QFont f_it = f; f_it.setItalic(true);
+                QFontMetricsF fm_it(f_it);
+                double cur_x = x;
+                auto spans = tokenizeMathText(n.text, fm.height());
+                for (const auto& sp : spans) {
+                    cur_x += sp.pre_pad;
+                    p.setFont(sp.italic ? f_it : f);
+                    p.drawText(QPointF(cur_x, y_base), sp.text);
+                    cur_x += (sp.italic ? fm_it.horizontalAdvance(sp.text) : fm.horizontalAdvance(sp.text)) + sp.post_pad;
+                }
+                return cur_x - x;
+            }
             case MathNode::SEQ: {
                 double cur_x = x;
                 for (const auto& c : n.children) cur_x += drawNode(p, c, cur_x, y_base, f);
                 return cur_x - x;
             }
             case MathNode::FRAC: {
-                QFont sf = shrinkFont(f, 0.85);
+                QFont sf = shrinkFont(f, 0.90);
                 auto nm = measureNode(n.children[0], sf);
                 auto dm = measureNode(n.children[1], sf);
-                double w = std::max(nm.w, dm.w) + 10.0;
-                double y_bar = y_base - fm.ascent() * 0.36;
-                p.setPen(QPen(fg_color, 1.3));
+                double w = std::max(nm.w, dm.w) + 12.0;
+                double y_bar = y_base - fm.ascent() * 0.34;
+                double gap = 3.5;
+                p.save();
+                p.setPen(QPen(fg_color, 1.1));
                 p.drawLine(QPointF(x + 2.0, y_bar), QPointF(x + w - 2.0, y_bar));
-                drawNode(p, n.children[0], x + 0.5 * (w - nm.w), y_bar - 3.0 - nm.desc, sf);
-                drawNode(p, n.children[1], x + 0.5 * (w - dm.w), y_bar + 3.0 + dm.asc, sf);
+                p.restore();
+                drawNode(p, n.children[0], x + 0.5 * (w - nm.w), y_bar - gap - nm.desc, sf);
+                drawNode(p, n.children[1], x + 0.5 * (w - dm.w), y_bar + gap + dm.asc, sf);
                 return w;
             }
             case MathNode::SQRT: {
@@ -639,7 +805,8 @@ protected:
                 double top_y = y_base - im.asc - 2.5;
                 double bot_y = y_base + im.desc;
                 double mid_y = 0.5 * (top_y + bot_y);
-                p.setPen(QPen(fg_color, 1.35));
+                p.save();
+                p.setPen(QPen(fg_color, 1.15));
                 QPainterPath rpath;
                 rpath.moveTo(x + 1.0, mid_y + 2.0);
                 rpath.lineTo(x + 3.5, mid_y);
@@ -647,31 +814,32 @@ protected:
                 rpath.lineTo(x + 10.5, top_y);
                 rpath.lineTo(x + 11.5 + im.w, top_y);
                 p.drawPath(rpath);
+                p.restore();
                 drawNode(p, n.children[0], x + 11.0, y_base, f);
                 return im.w + 13.0;
             }
             case MathNode::SUP: {
                 double bw = drawNode(p, n.children[0], x, y_base, f);
                 auto bm = measureNode(n.children[0], f);
-                QFont sf = shrinkFont(f, 0.74);
-                double sw = drawNode(p, n.children[1], x + bw + 0.5, y_base - bm.asc * 0.50, sf);
+                QFont sf = shrinkFont(f, 0.72);
+                double sw = drawNode(p, n.children[1], x + bw + 0.5, y_base - bm.asc * 0.46, sf);
                 return bw + sw + 1.5;
             }
             case MathNode::SUB: {
                 double bw = drawNode(p, n.children[0], x, y_base, f);
                 auto bm = measureNode(n.children[0], f);
-                QFont sf = shrinkFont(f, 0.74);
+                QFont sf = shrinkFont(f, 0.72);
                 auto sm = measureNode(n.children[1], sf);
-                double sw = drawNode(p, n.children[1], x + bw + 0.5, y_base + bm.desc * 0.35 + sm.asc * 0.65, sf);
+                double sw = drawNode(p, n.children[1], x + bw + 0.5, y_base + bm.desc * 0.30 + sm.asc * 0.60, sf);
                 return bw + sw + 1.5;
             }
             case MathNode::SUPSUB: {
                 double bw = drawNode(p, n.children[0], x, y_base, f);
                 auto bm = measureNode(n.children[0], f);
-                QFont sf = shrinkFont(f, 0.74);
+                QFont sf = shrinkFont(f, 0.72);
                 auto subm = measureNode(n.children[2], sf);
-                double sup_w = drawNode(p, n.children[1], x + bw + 0.5, y_base - bm.asc * 0.50, sf);
-                double sub_w = drawNode(p, n.children[2], x + bw + 0.5, y_base + bm.desc * 0.35 + subm.asc * 0.65, sf);
+                double sup_w = drawNode(p, n.children[1], x + bw + 0.5, y_base - bm.asc * 0.46, sf);
+                double sub_w = drawNode(p, n.children[2], x + bw + 0.5, y_base + bm.desc * 0.30 + subm.asc * 0.60, sf);
                 return bw + std::max(sup_w, sub_w) + 2.0;
             }
         }
@@ -687,11 +855,10 @@ protected:
         }
         p.setPen(fg_color);
 
-        QFont f("Serif", base_pt, QFont::Bold);
-        f.setStyleHint(QFont::Times);
+        QFont f = makeLatexBaseFont(base_pt + 1);
         auto m = measureNode(root_node, f);
         double y_base = 0.5 * (height() + m.asc - m.desc);
-        drawNode(p, root_node, 6.0, y_base, f);
+        drawNode(p, root_node, 8.0, y_base, f);
     }
 };
 
@@ -779,57 +946,182 @@ inline Poly polyFromRoots(const std::vector<Complex>& roots) {
     return res;
 }
 
-inline std::vector<Complex> solvePolynomialRoots(const Poly& coeffs_in, const std::vector<Complex>* warm_start = nullptr) {
-    Poly c = polyTrim(coeffs_in, 1e-14);
-    if (c.size() <= 1) return {};
-    size_t deg = c.size() - 1;
-    Complex lead = c[0];
-    for (auto& val : c) val /= lead;
+inline std::vector<Complex> solvePolynomialRoots(
+    const Poly& coeffs,
+    const std::vector<Complex>* warm_start = nullptr)
+{
+    Poly p = polyTrim(coeffs);
+    if (p.size() <= 1) return {};
+    size_t deg = p.size() - 1;
+    Complex lead = p[0];
+    if (std::abs(lead) < 1e-14) return {};
+    for (auto& c : p) c /= lead;
 
-    if (deg == 1) return {-c[1]};
+    // Exact closed-form for degree 1
+    if (deg == 1) {
+        Complex r = -p[1];
+        if (std::abs(r.imag()) < 1e-9) r.imag(0.0);
+        if (std::abs(r.real()) < 1e-12) r.real(0.0);
+        return {r};
+    }
+
+    // Exact closed-form for degree 2
     if (deg == 2) {
-        Complex b = c[1], d = c[2];
-        Complex disc = std::sqrt(b * b - 4.0 * d);
-        return {(-b + disc) / 2.0, (-b - disc) / 2.0};
+        Complex b = p[1], c = p[2];
+        Complex disc = std::sqrt(b * b - 4.0 * c);
+        std::vector<Complex> r2 = {(-b + disc) / 2.0, (-b - disc) / 2.0};
+        for (auto& r : r2) {
+            if (std::abs(r.imag()) < 1e-9) r.imag(0.0);
+            if (std::abs(r.real()) < 1e-12) r.real(0.0);
+        }
+        return r2;
     }
 
     std::vector<Complex> roots(deg);
     if (warm_start && warm_start->size() == deg) {
-        for (size_t i = 0; i < deg; ++i) {
-            double ang = 2.0 * PI * double(i) / double(deg) + 0.37;
-            roots[i] = (*warm_start)[i] + std::polar(1e-7, ang);
+        for (size_t k = 0; k < deg; ++k) {
+            double angle = 2.0 * M_PI * k / static_cast<double>(deg) + 0.137;
+            roots[k] = (*warm_start)[k] + std::polar(1e-7, angle);
         }
     } else {
+        // Cauchy bound radius for better initial guess scaling
         double max_c = 0.0;
-        for (size_t i = 1; i <= deg; ++i) max_c = std::max(max_c, std::abs(c[i]));
-        double radius = 0.4 + std::pow(std::max(max_c, 1.0), 1.0 / double(deg));
-        for (size_t i = 0; i < deg; ++i) {
-            double ang = 2.0 * PI * double(i) / double(deg) + 0.4123;
-            roots[i] = std::polar(radius, ang);
+        for (size_t k = 1; k <= deg; ++k) max_c = std::max(max_c, std::abs(p[k]));
+        double radius = 0.4 + std::pow(std::max(max_c, 0.1), 1.0 / static_cast<double>(deg));
+        for (size_t k = 0; k < deg; ++k) {
+            double angle = 2.0 * M_PI * k / static_cast<double>(deg) + 0.137;
+            roots[k] = std::polar(radius, angle);
         }
     }
 
-    for (int iter = 0; iter < 80; ++iter) {
+    // Helper lambda for Horner evaluation of monic polynomial p
+    auto evalMonic = [&p](Complex x) -> Complex {
+        Complex acc(0.0, 0.0);
+        for (const auto& c : p) acc = acc * x + c;
+        return acc;
+    };
+
+    // Durand-Kerner iterations
+    for (int iter = 0; iter < 400; ++iter) {
         double max_delta = 0.0;
         for (size_t i = 0; i < deg; ++i) {
-            Complex f_val = polyVal(c, roots[i]);
-            Complex prod(1.0, 0.0);
+            Complex val = evalMonic(roots[i]);
+            Complex denom(1.0, 0.0);
             for (size_t j = 0; j < deg; ++j) {
-                if (i == j) continue;
-                Complex diff = roots[i] - roots[j];
-                if (std::abs(diff) < 1e-14) diff = std::polar(1e-12, 0.73 * double(i + j));
-                prod *= diff;
+                if (i != j) {
+                    Complex diff = roots[i] - roots[j];
+                    if (std::abs(diff) < 1e-14) diff = Complex(1e-14, 1e-14);
+                    denom *= diff;
+                }
             }
-            Complex delta = f_val / prod;
+            Complex delta = val / denom;
             roots[i] -= delta;
             max_delta = std::max(max_delta, std::abs(delta));
         }
-        if (max_delta < 1e-10) break;
+        if (max_delta < 1e-14) break;
+    }
+
+    // Multiplicity Cluster Detection + (m-1)th Derivative Newton Polishing
+    // For an m-fold root, P(s) suffers catastrophic cancellation O(eps^(1/m)),
+    // whereas P^(m-1)(s) has a simple root at the exact same location with O(eps) accuracy!
+    std::vector<bool> visited(deg, false);
+    for (size_t i = 0; i < deg; ++i) {
+        if (visited[i]) continue;
+        std::vector<size_t> cluster = {i};
+        visited[i] = true;
+        Complex sum = roots[i];
+        // Expand cluster transitively within radius 2.5e-2
+        for (size_t k = 0; k < cluster.size(); ++k) {
+            Complex curr = roots[cluster[k]];
+            for (size_t j = 0; j < deg; ++j) {
+                if (!visited[j] && std::abs(roots[j] - curr) < 2.5e-2) {
+                    cluster.push_back(j);
+                    visited[j] = true;
+                    sum += roots[j];
+                }
+            }
+        }
+        size_t m = cluster.size();
+        if (m > 1) {
+            Complex centroid = sum / static_cast<double>(m);
+
+            // Track the best (smallest) residual among the individual unmerged roots in this cluster.
+            // If the roots are actually distinct simple roots (like -1 and -1.01), Durand-Kerner
+            // already converged each one to ~1e-15, whereas the midpoint centroid has |P| ~ 2.5e-5!
+            double min_root_resid = 1e300;
+            double max_root_resid = 0.0;
+            for (size_t idx : cluster) {
+                double r_res = std::abs(evalMonic(roots[idx]));
+                min_root_resid = std::min(min_root_resid, r_res);
+                max_root_resid = std::max(max_root_resid, r_res);
+            }
+
+            // Build derivatives P^(1), P^(2), ..., P^(m-1)
+            std::vector<Poly> derivs;
+            derivs.push_back(p); // derivs[0] = P(s)
+            for (size_t d = 1; d < m; ++d) {
+                const Poly& prev = derivs.back();
+                if (prev.size() <= 1) break;
+                size_t cur_deg = prev.size() - 1;
+                Poly next_dp(cur_deg);
+                for (size_t idx = 0; idx < cur_deg; ++idx) {
+                    next_dp[idx] = prev[idx] * static_cast<double>(cur_deg - idx);
+                }
+                derivs.push_back(next_dp);
+            }
+
+            // Polish centroid using Newton-Raphson on dp(s) = P^(m-1)(s) = 0
+            const Poly& dp = derivs.back();
+            Complex polished = centroid;
+            for (int n_it = 0; n_it < 8; ++n_it) {
+                Complex f_val(0.0, 0.0), df_val(0.0, 0.0);
+                size_t dp_deg = dp.size() - 1;
+                for (size_t idx = 0; idx <= dp_deg; ++idx) {
+                    f_val = f_val * polished + dp[idx];
+                    if (idx < dp_deg) {
+                        df_val = df_val * polished + dp[idx] * static_cast<double>(dp_deg - idx);
+                    }
+                }
+                if (std::abs(df_val) < 1e-14) break;
+                Complex step = f_val / df_val;
+                polished -= step;
+                if (std::abs(step) < 1e-15) break;
+            }
+
+            // Clean tiny imaginary/decimal dust on the polished root
+            if (std::abs(polished.imag()) < 1e-7) polished.imag(0.0);
+            double r_round = std::round(polished.real() * 1e6) / 1e6;
+            double i_round = std::round(polished.imag() * 1e6) / 1e6;
+            if (std::abs(polished.real() - r_round) < 1e-7) polished.real(r_round);
+            if (std::abs(polished.imag() - i_round) < 1e-7) polished.imag(i_round);
+
+            // Evaluate |P(polished)| and check all intermediate derivatives P^(k)(polished)
+            double polished_resid = std::abs(evalMonic(polished));
+            bool all_derivs_vanish = true;
+            for (size_t d = 0; d < derivs.size(); ++d) {
+                Complex dv(0.0, 0.0);
+                for (const auto& c : derivs[d]) dv = dv * polished + c;
+                // A true m-fold root has P^(d)(r) == 0 (within floating-point cancellation noise ~1e-9)
+                if (std::abs(dv) > 1e-8) {
+                    all_derivs_vanish = false;
+                    break;
+                }
+            }
+
+            // Accept the merge ONLY if:
+            // 1. All derivatives 0..m-1 vanish at `polished` (|P^(d)(polished)| <= 1e-8), AND
+            // 2. `polished` is at least as accurate as the unmerged roots (or within machine noise 1e-11)
+            if (all_derivs_vanish &&
+                std::abs(polished - centroid) < 5e-2 &&
+                polished_resid <= std::max(max_root_resid * 2.0, 1e-11)) {
+                for (size_t idx : cluster) roots[idx] = polished;
+            }
+        }
     }
 
     for (auto& r : roots) {
-        if (std::abs(r.real()) < 1e-10) r.real(0.0);
-        if (std::abs(r.imag()) < 1e-10) r.imag(0.0);
+        if (std::abs(r.imag()) < 1e-7) r.imag(0.0);
+        if (std::abs(r.real()) < 1e-12) r.real(0.0);
     }
     return roots;
 }
@@ -968,7 +1260,10 @@ inline ParsedPolynomial parsePolynomialInput(const std::string& raw_str) {
             }
             if (all_valid && !coeffs.empty()) {
                 coeffs = polyTrim(coeffs);
-                double lead = std::abs(coeffs[0].real()) > 1e-14 ? coeffs[0].real() : 1.0;
+                if (coeffs.empty() || (coeffs.size() == 1 && std::abs(coeffs[0]) <= 1e-14)) {
+                    return {{Complex(0.0, 0.0)}, {}, 0.0};
+                }
+                double lead = coeffs[0].real();
                 return {coeffs, solvePolynomialRoots(coeffs), lead};
             }
         }
@@ -976,7 +1271,10 @@ inline ParsedPolynomial parsePolynomialInput(const std::string& raw_str) {
 
     AlgebraicPolyParser parser(s);
     Poly coeffs = parser.parse();
-    double lead = std::abs(coeffs[0].real()) > 1e-14 ? coeffs[0].real() : 1.0;
+    if (coeffs.empty() || (coeffs.size() == 1 && std::abs(coeffs[0]) <= 1e-14)) {
+        return {{Complex(0.0, 0.0)}, {}, 0.0};
+    }
+    double lead = coeffs[0].real();
     return {coeffs, solvePolynomialRoots(coeffs), lead};
 }
 
@@ -2071,6 +2369,7 @@ public:
     std::string routh_custom_poly = "s^4 + 6s^3 + 21s^2 + (26 + K)s + 6K";
     std::string routh_k_eval = "10.0";
 
+    int theme_index = 0;
     bool light_mode = false;
 
     SharedSystemModel() {
@@ -2130,6 +2429,7 @@ public:
     }
 
     void saveToSettings(QSettings& s) const {
+        s.setValue("app/theme_index", theme_index);
         s.setValue("app/light_mode", light_mode);
 
         s.setValue("s/poles", serializeComplexVec(poles));
@@ -2176,8 +2476,9 @@ public:
     }
 
     void loadFromSettings(QSettings& s) {
-        light_mode = s.value("app/light_mode", false).toBool();
-        Theme::setLightMode(light_mode);
+        theme_index = s.value("app/theme_index", 0).toInt();
+        light_mode  = (theme_index == 1 || theme_index == 5);
+        Theme::setTheme(theme_index);
         PRECISION.mode       = s.value("app/prec_mode", "class").toString().toStdString();
         PRECISION.dec_sub1   = s.value("app/dec_sub1", 3).toInt();
         PRECISION.dec_ge1    = s.value("app/dec_ge1", 2).toInt();
@@ -2316,6 +2617,19 @@ inline QPushButton* makeActionBtn(const QString& text, const QString& accent_fg,
     return b;
 }
 
+inline QScrollArea* wrapInLeftScroll(QWidget* left_w, int min_w = 380) {
+    auto* sa = new QScrollArea();
+    sa->setWidgetResizable(true);
+    sa->setFrameShape(QFrame::NoFrame);
+    sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    sa->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    sa->setMinimumWidth(min_w);
+    sa->setStyleSheet("QScrollArea { background: transparent; border: none; }");
+    left_w->setMinimumWidth(min_w - 16);
+    sa->setWidget(left_w);
+    return sa;
+}
+
 // Reusable Editable Poles (×) & Zeros (○) Card with SpinBox Count & Scrollable Re/Im Rows
 class PoleZeroEditorCard : public QFrame {
     Q_OBJECT
@@ -2326,6 +2640,8 @@ public:
     double default_re;
     bool updating = false;
     std::function<void()> onValuesChanged;
+    QScrollArea* scroll = nullptr;
+    PoleZeroEditorCard* peer_card = nullptr;
 
     PoleZeroEditorCard(const QString& title, const QString& accent_col, double def_re = -1.0, QWidget* parent = nullptr)
         : QFrame(parent), default_re(def_re)
@@ -2370,9 +2686,10 @@ public:
         col_hdr->addWidget(h_im, 1);
         vl->addLayout(col_hdr);
 
-        auto* scroll = new QScrollArea();
+        scroll = new QScrollArea();
         scroll->setWidgetResizable(true);
-        scroll->setFixedHeight(68);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scroll->setStyleSheet("QScrollArea { background: transparent; border: none; }");
         auto* container = new QWidget();
         container->setStyleSheet("background: transparent; border: none;");
@@ -2388,6 +2705,36 @@ public:
             syncRowCount(cnt);
             if (onValuesChanged) onValuesChanged();
         });
+    }
+
+    void syncHeightWithPeer() {
+        // Auto-discover the sibling PoleZeroEditorCard in the same row if not yet linked
+        if (!peer_card && parentWidget()) {
+            for (auto* sibling : parentWidget()->findChildren<PoleZeroEditorCard*>()) {
+                if (sibling != this) {
+                    peer_card = sibling;
+                    sibling->peer_card = this;
+                    break;
+                }
+            }
+        }
+
+        int my_n = static_cast<int>(row_edits.size());
+        int peer_n = peer_card ? static_cast<int>(peer_card->row_edits.size()) : 0;
+        int max_n = std::max(my_n, peer_n);
+
+        int row_h = 28; // height per row (input box + spacing)
+        int target_h = (max_n == 0) ? 28 : (max_n * row_h + 4);
+
+        if (scroll) {
+            scroll->setFixedHeight(target_h);
+        }
+        updateGeometry();
+
+        if (peer_card && peer_card->scroll) {
+            peer_card->scroll->setFixedHeight(target_h);
+            peer_card->updateGeometry();
+        }
     }
 
     void syncRowCount(int target) {
@@ -2421,6 +2768,12 @@ public:
             connect(re_e, &QLineEdit::returnPressed, this, trig);
             connect(im_e, &QLineEdit::returnPressed, this, trig);
         }
+        syncHeightWithPeer();
+    }
+
+    void showEvent(QShowEvent* ev) override {
+        QFrame::showEvent(ev);
+        syncHeightWithPeer();
     }
 
     void setValues(const std::vector<Complex>& vals) {
