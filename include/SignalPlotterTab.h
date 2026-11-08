@@ -59,13 +59,37 @@ public:
             if (std::isspace(static_cast<unsigned char>(c))) { ++i; continue; }
             if (std::isdigit(static_cast<unsigned char>(c)) || c == '.') {
                 size_t start = i;
-                while (i < n && (std::isdigit(static_cast<unsigned char>(expr[i])) || expr[i] == '.')) ++i;
+                bool has_digit = false;
+                int dot_count = 0;
+                while (i < n && (std::isdigit(static_cast<unsigned char>(expr[i])) || expr[i] == '.')) {
+                    if (expr[i] == '.') ++dot_count;
+                    else has_digit = true;
+                    ++i;
+                }
+                if (!has_digit || dot_count > 1) {
+                    valid = false;
+                    err_msg = "Malformed numeric literal '" + expr.substr(start, i - start) + "'";
+                    return false;
+                }
                 if (i < n && (expr[i] == 'e' || expr[i] == 'E')) {
                     ++i;
                     if (i < n && (expr[i] == '+' || expr[i] == '-')) ++i;
+                    size_t exp_start = i;
                     while (i < n && std::isdigit(static_cast<unsigned char>(expr[i]))) ++i;
+                    if (i == exp_start) {
+                        valid = false;
+                        err_msg = "Malformed exponent in number";
+                        return false;
+                    }
                 }
-                double v = std::stod(expr.substr(start, i - start));
+                std::string tok_str = expr.substr(start, i - start);
+                char* end_ptr = nullptr;
+                double v = std::strtod(tok_str.c_str(), &end_ptr);
+                if (!end_ptr || *end_ptr != '\0' || !std::isfinite(v)) {
+                    valid = false;
+                    err_msg = "Invalid number '" + tok_str + "'";
+                    return false;
+                }
                 if (!tokens.empty() && (tokens.back().kind == Tok::NUM || tokens.back().kind == Tok::ID || tokens.back().kind == Tok::RPAREN)) {
                     tokens.push_back({Tok::OP, "*", 0.0});
                 }
@@ -213,6 +237,39 @@ public:
             op_stack.pop_back();
             if (top.rfind("FN:", 0) == 0) top = top.substr(3);
             if (!emitOp(top)) return false;
+        }
+
+        // Validate stack depth and exact operand arity at compile time:
+        int sim_sp = 0;
+        for (const auto& ins : code) {
+            int pops = 0, pushes = 1;
+            switch (ins.op) {
+                case OP_NUM: case OP_VAR_T: case OP_VAR_X: case OP_PARAM:
+                    pops = 0; pushes = 1; break;
+                case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV:
+                case OP_POW: case OP_GT:  case OP_LT:  case OP_MIN: case OP_MAX:
+                    pops = 2; pushes = 1; break;
+                case OP_CLAMP:
+                    pops = 3; pushes = 1; break;
+                default: // All unary functions/operators
+                    pops = 1; pushes = 1; break;
+            }
+            if (sim_sp < pops) {
+                valid = false;
+                err_msg = "Invalid expression or wrong number of function arguments";
+                return false;
+            }
+            sim_sp = sim_sp - pops + pushes;
+            if (sim_sp >= 64) {
+                valid = false;
+                err_msg = "Expression exceeds maximum evaluation stack depth (64)";
+                return false;
+            }
+        }
+        if (sim_sp != 1) {
+            valid = false;
+            err_msg = "Malformed expression (unbalanced arguments or operators)";
+            return false;
         }
         return !code.empty();
     }
