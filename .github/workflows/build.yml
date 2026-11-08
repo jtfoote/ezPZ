@@ -50,21 +50,21 @@ jobs:
 
           # Prepare AppDir structure
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
-          cp build-linux/control_systems_suite AppDir/usr/bin/
+          cp build-linux/pzsuite AppDir/usr/bin/
 
-          cat << 'DESKTOP' > AppDir/usr/share/applications/ControlSystemsSuite.desktop
+          cat << 'DESKTOP' > AppDir/usr/share/applications/PZSuite.desktop
           [Desktop Entry]
           Type=Application
-          Name=Control Systems Suite
+          Name=PZSuite
           Comment=Interactive Control Systems & DSP Engineering Suite
-          Exec=control_systems_suite
-          Icon=ControlSystemsSuite
+          Exec=pzsuite
+          Icon=PZSuite
           Terminal=false
           Categories=Science;Engineering;Education;
           DESKTOP
 
           # Generate a clean vector icon required by linuxdeploy
-          cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg
+          cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/PZSuite.svg
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
             <rect width="64" height="64" rx="12" fill="#0b0f19"/>
             <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
@@ -81,14 +81,14 @@ jobs:
 
           export QMAKE="$(which qmake6 || which qmake)"
           export EXTRA_QT_PLUGINS="svg;iconengines;wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration"
-          export LDAI_OUTPUT="ControlSystemsSuite-Linux-x86_64.AppImage"
+          export LDAI_OUTPUT="PZSuite-Linux-x86_64.AppImage"
 
           # Run linuxdeploy (using --appimage-extract-and-run for CI compatibility)
           ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
             --appdir AppDir \
-            --executable AppDir/usr/bin/control_systems_suite \
-            --desktop-file AppDir/usr/share/applications/ControlSystemsSuite.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg \
+            --executable AppDir/usr/bin/pzsuite \
+            --desktop-file AppDir/usr/share/applications/PZSuite.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/PZSuite.svg \
             --plugin qt \
             --output appimage
 
@@ -96,42 +96,42 @@ jobs:
           cat << 'INSTALLER' > install.sh
           #!/usr/bin/env bash
           set -e
-          APP_DIR="$HOME/.local/opt/ControlSystemsSuite"
+          APP_DIR="$HOME/.local/opt/PZSuite"
           mkdir -p "$APP_DIR" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
 
-          cp -f ControlSystemsSuite-Linux-x86_64.AppImage "$APP_DIR/"
-          chmod +x "$APP_DIR/ControlSystemsSuite-Linux-x86_64.AppImage"
-          cp -f ControlSystemsSuite.svg "$HOME/.local/share/icons/hicolor/scalable/apps/"
+          cp -f PZSuite-Linux-x86_64.AppImage "$APP_DIR/"
+          chmod +x "$APP_DIR/PZSuite-Linux-x86_64.AppImage"
+          cp -f PZSuite.svg "$HOME/.local/share/icons/hicolor/scalable/apps/"
 
-          cat << EOF > "$HOME/.local/share/applications/ControlSystemsSuite.desktop"
+          cat << EOF > "$HOME/.local/share/applications/PZSuite.desktop"
           [Desktop Entry]
           Type=Application
-          Name=Control Systems Suite
+          Name=PZSuite
           Comment=Interactive Control Systems & DSP Engineering Suite
-          Exec=$APP_DIR/ControlSystemsSuite-Linux-x86_64.AppImage
-          Icon=$HOME/.local/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg
+          Exec=$APP_DIR/PZSuite-Linux-x86_64.AppImage
+          Icon=$HOME/.local/share/icons/hicolor/scalable/apps/PZSuite.svg
           Terminal=false
           Categories=Science;Engineering;Education;
           EOF
 
-          chmod +x "$HOME/.local/share/applications/ControlSystemsSuite.desktop"
+          chmod +x "$HOME/.local/share/applications/PZSuite.desktop"
           update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-          echo "✅ Control Systems Suite installed! You can now launch it from your Start Menu."
+          echo "✅ PZSuite installed! You can now launch it from your Start Menu."
           INSTALLER
           chmod +x install.sh
-          cp AppDir/usr/share/icons/hicolor/scalable/apps/ControlSystemsSuite.svg .
+          cp AppDir/usr/share/icons/hicolor/scalable/apps/PZSuite.svg .
 
           # Also create a standard .tar.gz portable bundle (in case FUSE isn't installed on the target machine)
-          tar -czf ControlSystemsSuite-Linux-x86_64-Portable.tar.gz -C AppDir .
+          tar -czf PZSuite-Linux-x86_64-Portable.tar.gz -C AppDir .
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ControlSystemsSuite-Linux-x86_64
+          name: PZSuite-Linux-x86_64
           path: |
-            ControlSystemsSuite-Linux-x86_64.AppImage
-            ControlSystemsSuite-Linux-x86_64-Portable.tar.gz
-            ControlSystemsSuite.svg
+            PZSuite-Linux-x86_64.AppImage
+            PZSuite-Linux-x86_64-Portable.tar.gz
+            PZSuite.svg
             install.sh
 
   # ---------------------------------------------------------------------------
@@ -165,24 +165,24 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET="11.0"
           cmake --build build-mac --config Release --parallel
 
-          APP_PATH="build-mac/control_systems_suite.app"
+          APP_PATH="build-mac/pzsuite.app"
           macdeployqt "$APP_PATH" -always-overwrite
           codesign --force --deep --sign - "$APP_PATH"
 
-          hdiutil create -volname "Control Systems Suite" \
+          hdiutil create -volname "PZSuite" \
             -srcfolder "$APP_PATH" -ov -format UDZO \
-            ControlSystemsSuite-macOS-Universal.dmg
+            PZSuite-macOS-Universal.dmg
 
           ditto -c -k --sequesterRsrc --keepParent \
-            "$APP_PATH" ControlSystemsSuite-macOS-Universal-App.zip
+            "$APP_PATH" PZSuite-macOS-Universal-App.zip
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ControlSystemsSuite-macOS-Universal
+          name: PZSuite-macOS-Universal
           path: |
-            ControlSystemsSuite-macOS-Universal.dmg
-            ControlSystemsSuite-macOS-Universal-App.zip
+            PZSuite-macOS-Universal.dmg
+            PZSuite-macOS-Universal-App.zip
 
   # ---------------------------------------------------------------------------
   # 3. Windows 64-bit Standalone Executable (.zip)
@@ -218,16 +218,16 @@ jobs:
           cmake --build build-win --config Release --parallel
 
           mkdir -p dist-win
-          if [ -f "build-win/Release/control_systems_suite.exe" ]; then
-            cp "build-win/Release/control_systems_suite.exe" dist-win/
+          if [ -f "build-win/Release/pzsuite.exe" ]; then
+            cp "build-win/Release/pzsuite.exe" dist-win/
           else
-            cp "build-win/control_systems_suite.exe" dist-win/
+            cp "build-win/pzsuite.exe" dist-win/
           fi
 
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist-win/control_systems_suite.exe
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist-win/pzsuite.exe
 
       - name: Upload Windows .zip Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ControlSystemsSuite-Windows-x64
+          name: PZSuite-Windows-x64
           path: dist-win/

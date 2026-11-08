@@ -65,20 +65,24 @@ public:
         poly_status_lbl = new QLabel("Enter Num(z) & Den(z) (e.g. z^2-0.94z+0.33) to auto-compute z-Zeros & z-Poles");
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
+
+        // 2. Editable z-Poles (×) & z-Zeros (○) Tables Row
+        auto* pz_row = new QHBoxLayout();
+        poles_card = new PoleZeroEditorCard("z-Poles (×)", Theme::ACCENT_POLE, 0.6);
+        zeros_card = new PoleZeroEditorCard("z-Zeros (○)", Theme::ACCENT_ZERO, -1.0);
+        poles_card->peer_card = zeros_card;
+        zeros_card->peer_card = poles_card;
+        poles_card->syncHeightWithPeer();
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        poly_l->addLayout(pz_row);
+
         fb_bar = new FeedbackConfigBar("z", "H_fb");
         poly_l->addWidget(fb_bar);
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ASYMP), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
         fb_bar->onChanged = [this]() { fb_bar->syncToModelZ(model); runSimulation(true); };
         left_v->addWidget(poly_card);
-
-        // 2. Editable z-Poles (×) & z-Zeros (○) Tables Row
-        auto* pz_row = new QHBoxLayout();
-        poles_card = new PoleZeroEditorCard("z-Poles (×)", Theme::ACCENT_POLE, 0.6);
-        zeros_card = new PoleZeroEditorCard("z-Zeros (○)", Theme::ACCENT_ZERO, -1.0);
-        pz_row->addWidget(poles_card, 1);
-        pz_row->addWidget(zeros_card, 1);
-        left_v->addLayout(pz_row);
 
         // 3. Discrete PID & Prototype Card
         auto* pid_card = makeCard();
@@ -333,6 +337,7 @@ public:
             model->z_poles = pd.roots;
             poles_card->setValues(model->z_poles);
             zeros_card->setValues(model->z_zeros);
+            if (fb_bar) fb_bar->syncToModelZ(model);
             runSimulation(true);
         } catch (const std::exception& e) {
             poly_status_lbl->setText(QString("⚠ %1").arg(e.what()));

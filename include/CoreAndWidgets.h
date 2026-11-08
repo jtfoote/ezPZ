@@ -242,7 +242,7 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     generator.setFileName(path);
     generator.setSize(canvas->size());
     generator.setViewBox(QRect(0, 0, canvas->width(), canvas->height()));
-    generator.setTitle("Control Systems Suite Plot");
+    generator.setTitle("PZSuite Plot");
 
     canvas->render(&generator);
 
@@ -277,6 +277,7 @@ struct PrecisionConfig {
     int dec_sub1 = 3;
     int dec_ge1  = 2;
     bool step_round = false;
+    bool omit_trailing_zeros = false;
 
     int decimalsFor(double val) const {
         double av = std::abs(val);
@@ -310,7 +311,7 @@ struct PrecisionConfig {
         oss << std::fixed << std::setprecision(d) << fval;
         std::string out = oss.str();
 
-        if (strip_zeros && out.find('.') != std::string::npos) {
+        if ((strip_zeros || omit_trailing_zeros) && out.find('.') != std::string::npos) {
             while (!out.empty() && out.back() == '0') out.pop_back();
             if (!out.empty() && out.back() == '.') out.pop_back();
             if (out.empty() || out == "-" || out == "+") out = "0";
@@ -334,11 +335,17 @@ struct PrecisionConfig {
     }
 
     std::string summaryLabel() const {
+        std::string s;
         if (mode == "class") {
-            return "0<|x|<1: " + std::to_string(dec_sub1) + " dec, |x|≥1: " + std::to_string(dec_ge1) + " dec" + (step_round ? " • Step-Round ON" : "");
+            s = "0<|x|<1: " + std::to_string(dec_sub1) + " dec, |x|≥1: " + std::to_string(dec_ge1) + " dec";
+        } else if (mode == "fixed") {
+            s = "Fixed " + std::to_string(dec_ge1) + " dec";
+        } else {
+            s = "Auto Precision";
         }
-        if (mode == "fixed") return "Fixed " + std::to_string(dec_ge1) + " dec";
-        return "Auto Precision";
+        if (step_round) s += " • Step-Round ON";
+        if (omit_trailing_zeros) s += " • Omit Trailing 0s";
+        return s;
     }
 };
 
@@ -406,13 +413,14 @@ public:
                                const QColor& bg = QColor(Theme::BG_INPUT),
                                int pt = 10,
                                QWidget* parent = nullptr)
-        : QWidget(parent), raw_latex(latex), fg_color(fg), bg_color(bg), base_pt(pt)
+        : QWidget(parent), fg_color(fg), bg_color(bg), base_pt(pt)
     {
         setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         setLatex(latex);
     }
 
     void setLatex(const QString& ltx) {
+        if (raw_latex == ltx && !root_node.children.empty()) return;
         raw_latex = ltx;
         root_node = parseSegment(cleanLatexTop(raw_latex.toStdString()));
         QFont f = makeLatexBaseFont(base_pt + 1);
@@ -425,6 +433,8 @@ public:
     }
 
     QSize sizeHint() const override { return cached_size; }
+
+    QSize minimumSizeHint() const override { return cached_size; }
 
 protected:
     struct MathNode {
@@ -2469,6 +2479,7 @@ public:
         s.setValue("app/dec_ge1", PRECISION.dec_ge1);
         s.setValue("app/step_round", PRECISION.step_round);
         s.setValue("app/sync_enabled", sync_enabled);
+        s.setValue("app/omit_zeros", PRECISION.omit_trailing_zeros);
 
         s.setValue("routh/mode", routh_mode);
         s.setValue("routh/custom_poly", QString::fromStdString(routh_custom_poly));
@@ -2483,6 +2494,7 @@ public:
         PRECISION.dec_sub1   = s.value("app/dec_sub1", 3).toInt();
         PRECISION.dec_ge1    = s.value("app/dec_ge1", 2).toInt();
         PRECISION.step_round = s.value("app/step_round", false).toBool();
+        PRECISION.omit_trailing_zeros = s.value("app/omit_zeros", false).toBool();
         sync_enabled         = s.value("app/sync_enabled", true).toBool();
         if (!s.contains("s/plant_gain")) return; // First run: keep defaults
 
@@ -2649,7 +2661,7 @@ public:
         setStyleSheet(QString("QFrame { background-color: %1; border: 1px solid %2; border-radius: 6px; }")
                       .arg(Theme::BG_PANEL, Theme::BORDER_PANEL));
         // Prevent the card from stretching vertically and creating gaps around '# Re Im'
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
 
         auto* vl = new QVBoxLayout(this);
         vl->setContentsMargins(8, 6, 8, 6);
@@ -2698,7 +2710,8 @@ public:
         rows_layout->setSpacing(3);
         rows_layout->setAlignment(Qt::AlignTop);
         scroll->setWidget(container);
-        vl->addWidget(scroll);
+        scroll->setMinimumHeight(34);
+        vl->addWidget(scroll, 1);
 
         connect(count_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int cnt) {
             if (updating) return;
@@ -2708,33 +2721,13 @@ public:
     }
 
     void syncHeightWithPeer() {
-        // Auto-discover the sibling PoleZeroEditorCard in the same row if not yet linked
-        if (!peer_card && parentWidget()) {
-            for (auto* sibling : parentWidget()->findChildren<PoleZeroEditorCard*>()) {
-                if (sibling != this) {
-                    peer_card = sibling;
-                    sibling->peer_card = this;
-                    break;
-                }
-            }
-        }
-
-        int my_n = static_cast<int>(row_edits.size());
-        int peer_n = peer_card ? static_cast<int>(peer_card->row_edits.size()) : 0;
-        int max_n = std::max(my_n, peer_n);
-
-        int row_h = 28; // height per row (input box + spacing)
-        int target_h = (max_n == 0) ? 28 : (max_n * row_h + 4);
-
-        if (scroll) {
-            scroll->setFixedHeight(target_h);
-        }
-        updateGeometry();
-
-        if (peer_card && peer_card->scroll) {
-            peer_card->scroll->setFixedHeight(target_h);
-            peer_card->updateGeometry();
-        }
+        int my_rows = std::clamp(count_spin ? count_spin->value() : 1, 1, 4);
+        int peer_rows = (peer_card && peer_card->count_spin)
+                        ? std::clamp(peer_card->count_spin->value(), 1, 4)
+                        : my_rows;
+        int target_h = std::max(my_rows, peer_rows) * 27 + 6;
+        if (scroll) scroll->setFixedHeight(target_h);
+        if (peer_card && peer_card->scroll) peer_card->scroll->setFixedHeight(target_h);
     }
 
     void syncRowCount(int target) {

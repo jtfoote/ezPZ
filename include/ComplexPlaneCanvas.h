@@ -43,8 +43,8 @@ public:
     // Breakaway / Break-In & jw-Axis Crossing Overlays
     bool show_breakaway = true;
     bool show_jw_crossings = true;
-
     bool show_dep_arr_angles = true;
+    bool show_test_point = true;
 
     struct DepArrInfo {
         Complex pt;
@@ -605,11 +605,15 @@ protected:
         }
 
         // Vector rays to Test Point
-        QPointF tp_px = toPx(test_point);
-        p.setPen(QPen(QColor("#1e40af"), 1.1, Qt::DotLine));
-        for (const auto& z : zeros) p.drawLine(toPx(z), tp_px);
-        p.setPen(QPen(QColor("#881337"), 1.1, Qt::DotLine));
-        for (const auto& pl : poles) p.drawLine(toPx(pl), tp_px);
+        QPointF tp_px;
+        if (show_test_point) {
+            tp_px = toPx(test_point);
+            p.setPen(QPen(QColor("#1e40af"), 1.1, Qt::DotLine));
+            for (const auto& z : zeros) p.drawLine(toPx(z), tp_px);
+            p.setPen(QPen(QColor("#881337"), 1.1, Qt::DotLine));
+            for (const auto& pl : poles) p.drawLine(toPx(pl), tp_px);
+        }
+        
 
         // Zeros (o)
         p.setPen(QPen(QColor(Theme::ACCENT_ZERO), 2.2));
@@ -747,31 +751,33 @@ protected:
         }
 
         // Test Point (Green when ON RL, Orange when OFF RL)
-        QColor tp_col(is_on_rl ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
-        if (is_on_rl) {
-            p.setPen(QPen(tp_col, 1.5));
-            p.setBrush(Qt::NoBrush);
-            p.drawEllipse(tp_px, 9.0, 9.0);
-        }
-        p.setPen(QPen(Qt::white, 1.5));
-        p.setBrush(tp_col);
-        p.drawEllipse(tp_px, 5.5, 5.5);
+        if (show_test_point) {
+            QColor tp_col(is_on_rl ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
+            if (is_on_rl) {
+                p.setPen(QPen(tp_col, 1.5));
+                p.setBrush(Qt::NoBrush);
+                p.drawEllipse(tp_px, 9.0, 9.0);
+            }
+            p.setPen(QPen(Qt::white, 1.5));
+            p.setBrush(tp_col);
+            p.drawEllipse(tp_px, 5.5, 5.5);
 
-        p.setPen(tp_col);
-        p.setFont(QFont("Monospace", 9, QFont::Bold));
-        QString tag = is_z_plane
-            ? QString("z (%1) |z|=%2 [%3]")
-                  .arg(QString::fromStdString(PRECISION.fmtComplex(test_point)))
-                  .arg(QString::fromStdString(PRECISION.fmt(std::abs(test_point))))
-                  .arg(is_on_rl ? "ON RL" : "OFF RL")
-            : QString("s (%1) [%2]")
-                  .arg(QString::fromStdString(PRECISION.fmtComplex(test_point)))
-                  .arg(is_on_rl ? "ON RL" : "OFF RL");
-        p.drawText(tp_px + QPointF(10, -8), tag);
+            p.setPen(tp_col);
+            p.setFont(QFont("Monospace", 9, QFont::Bold));
+            QString tag = is_z_plane
+                ? QString("z (%1) |z|=%2 [%3]")
+                    .arg(QString::fromStdString(PRECISION.fmtComplex(test_point)))
+                    .arg(QString::fromStdString(PRECISION.fmt(std::abs(test_point))))
+                    .arg(is_on_rl ? "ON RL" : "OFF RL")
+                : QString("s (%1) [%2]")
+                    .arg(QString::fromStdString(PRECISION.fmtComplex(test_point)))
+                    .arg(is_on_rl ? "ON RL" : "OFF RL");
+            p.drawText(tp_px + QPointF(10, -8), tag);
+        }  
     }
 
     void mousePressEvent(QMouseEvent* e) override {
-        if (e->button() == Qt::LeftButton) {
+        if (e->button() == Qt::LeftButton && show_test_point) {
             user_bounds_set = true;
             Complex clicked_pt = pxToComplex(e->pos());
             // Snap to nearest spec intersection if clicked within 12 pixels

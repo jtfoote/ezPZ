@@ -17,5 +17,5 @@ main_old.cpp
 # Local backups & machine-specific files
 *.bak
 *.user
-ControlSystemsSuite.desktop
+*.desktop
 EOF

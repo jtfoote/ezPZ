@@ -72,20 +72,23 @@ public:
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
+        // 2. Editable Poles (×) & Zeros (○) Tables Row
+        auto* pz_row = new QHBoxLayout();
+        poles_card = new PoleZeroEditorCard("G(s) Poles (×)", Theme::ACCENT_POLE, -1.0);
+        zeros_card = new PoleZeroEditorCard("G(s) Zeros (○)", Theme::ACCENT_ZERO, -3.0);
+        poles_card->peer_card = zeros_card;
+        zeros_card->peer_card = poles_card;
+        poles_card->syncHeightWithPeer();
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        poly_l->addLayout(pz_row);
+
         fb_bar = new FeedbackConfigBar("s", "H");
         poly_l->addWidget(fb_bar);
 
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
         left_v->addWidget(poly_card);
-
-        // 2. Editable Poles (×) & Zeros (○) Tables Row
-        auto* pz_row = new QHBoxLayout();
-        poles_card = new PoleZeroEditorCard("Poles (×)", Theme::ACCENT_POLE, -1.0);
-        zeros_card = new PoleZeroEditorCard("Zeros (○)", Theme::ACCENT_ZERO, -3.0);
-        pz_row->addWidget(poles_card, 1);
-        pz_row->addWidget(zeros_card, 1);
-        left_v->addLayout(pz_row);
 
         // 3. Frequency Sweep & Loop Mode Configuration Card
         auto* sys_card = makeCard();

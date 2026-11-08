@@ -12,7 +12,7 @@ public:
 
     QComboBox* mode_combo;
     QSpinBox *sub1_spin, *ge1_spin;
-    QCheckBox *step_round_chk, *sync_chk;
+    QCheckBox *step_round_chk, *sync_chk, *omit_zeros_chk;
     QLabel* preview_lbl;
 
     AppSettingsDialog(SharedSystemModel* m,
@@ -90,6 +90,11 @@ public:
         sr_hint->setWordWrap(true);
         sr_hint->setStyleSheet("color: #64748b; font-size: 10px; border: none;");
         pl->addWidget(sr_hint);
+
+        omit_zeros_chk = new QCheckBox("Omit Trailing Zeros (e.g. 2.500 → 2.5, 4.00 → 4)");
+        omit_zeros_chk->setChecked(PRECISION.omit_trailing_zeros);
+        omit_zeros_chk->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border: none;").arg(Theme::ACCENT_ZERO));
+        pl->addWidget(omit_zeros_chk);
 
         preview_lbl = new QLabel();
         preview_lbl->setStyleSheet(QString("background-color: %1; color: %2; font-family: Monospace; font-size: 11px; font-weight: bold; padding: 8px; border-radius: 4px; border: 1px solid %3;")
@@ -172,15 +177,16 @@ public:
             PRECISION.dec_sub1 = sub1_spin->value();
             PRECISION.dec_ge1  = ge1_spin->value();
             PRECISION.step_round = step_round_chk->isChecked();
+            PRECISION.omit_trailing_zeros = omit_zeros_chk->isChecked();
             model->sync_enabled  = sync_chk->isChecked();
 
             sub1_spin->setEnabled(idx == 0);
             ge1_spin->setEnabled(idx != 2);
 
-            preview_lbl->setText(QString("Active Rule: %1\nSample < 1 : 0.45598  →  %2\nSample ≥ 1 : 24.0642  →  %3")
+            preview_lbl->setText(QString("Active Rule: %1\nSample < 1 : 0.45000  →  %2\nSample ≥ 1 : 24.0000  →  %3")
                 .arg(QString::fromStdString(PRECISION.summaryLabel()))
-                .arg(QString::fromStdString(PRECISION.fmt(0.45598)))
-                .arg(QString::fromStdString(PRECISION.fmt(24.0642))));
+                .arg(QString::fromStdString(PRECISION.fmt(0.45000)))
+                .arg(QString::fromStdString(PRECISION.fmt(24.0000))));
 
             if (onSettingsChanged) onSettingsChanged();
         };
@@ -190,6 +196,7 @@ public:
         connect(ge1_spin,   QOverload<int>::of(&QSpinBox::valueChanged),         this, [applyChanges](int) { applyChanges(); });
         connect(step_round_chk, &QCheckBox::toggled, this, [applyChanges](bool) { applyChanges(); });
         connect(sync_chk,       &QCheckBox::toggled, this, [applyChanges](bool) { applyChanges(); });
+        connect(omit_zeros_chk, &QCheckBox::toggled, this, [applyChanges](bool) { applyChanges(); });
 
         connect(reset_btn, &QPushButton::clicked, this, [this]() {
             if (onResetDefaults) onResetDefaults();

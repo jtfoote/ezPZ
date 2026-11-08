@@ -13,6 +13,7 @@ public:
     MathFormulaWidget* tf_math_w;
     PoleZeroEditorCard *poles_card, *zeros_card;
     QRadioButton *cart_radio, *polar_radio;
+    QCheckBox* chk_tp_show = nullptr;
     bool is_polar_mode = false;
 
     QFrame* rl_banner;
@@ -82,21 +83,33 @@ public:
         poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
         poly_l->addWidget(poly_status_lbl);
 
+        // Editable G(s) Poles (×) & G(s) Zeros (○) Tables directly under G(s) Num/Den
+        auto* pz_row = new QHBoxLayout();
+        pz_row->setContentsMargins(0, 2, 0, 2);
+        pz_row->setSpacing(6);
+        poles_card = new PoleZeroEditorCard("G(s) Poles (×)", Theme::ACCENT_POLE, -1.0);
+        zeros_card = new PoleZeroEditorCard("G(s) Zeros (○)", Theme::ACCENT_ZERO, -3.0);
+        poles_card->peer_card = zeros_card;
+        zeros_card->peer_card = poles_card;
+        poles_card->syncHeightWithPeer();
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        poly_l->addLayout(pz_row);
+
+        // Feedback Path H(s) (with its own collapsible H(s) Poles & Zeros tables)
         fb_bar = new FeedbackConfigBar("s", "H");
         poly_l->addWidget(fb_bar);
-        fb_bar->onChanged = [this]() { fb_bar->syncToModelS(model); evaluateCurrent(true); };
+        fb_bar->onChanged = [this]() {
+            if (updating_ui) return;
+            fb_bar->syncToModelS(model);
+            evaluateCurrent(true);
+        };
 
+        // Combined LaTeX Transfer Function Display at the bottom of the card
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
         left_v->addWidget(poly_card);
 
-        // 2. Editable Poles (×) & Zeros (○) Tables Row
-        auto* pz_row = new QHBoxLayout();
-        poles_card = new PoleZeroEditorCard("Poles (×)", Theme::ACCENT_POLE, -1.0);
-        zeros_card = new PoleZeroEditorCard("Zeros (○)", Theme::ACCENT_ZERO, -3.0);
-        pz_row->addWidget(poles_card, 1);
-        pz_row->addWidget(zeros_card, 1);
-        left_v->addLayout(pz_row);
 
         // 3. Test Point s & Cartesian / Polar Switcher Card
         auto* tp_card = makeCard();
@@ -137,13 +150,13 @@ public:
         spec_l->addWidget(spec_title);
 
         auto* sp_grid = new QGridLayout();
-        chk_ts_spec   = new QCheckBox("Ts (s):");   
+        chk_ts_spec   = new QCheckBox("Ts (s):");
         chk_ts_spec->setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 10px;");
         edit_ts_spec  = makeDarkEntry("2.0", 48);
-        chk_tp_spec   = new QCheckBox("Tp (s):");   
+        chk_tp_spec   = new QCheckBox("Tp (s):");
         chk_tp_spec->setStyleSheet("color: #f472b6; font-weight: bold; font-size: 10px;");
         edit_tp_spec  = makeDarkEntry("1.0", 48);
-        chk_zeta_spec = new QCheckBox("ζ Ray:");    
+        chk_zeta_spec = new QCheckBox("ζ Ray:");
         chk_zeta_spec->setStyleSheet("color: #facc15; font-weight: bold; font-size: 10px;");
         edit_zeta_spec = makeDarkEntry("0.707", 48);
 
@@ -283,10 +296,12 @@ public:
         auto* chk_brk = new QCheckBox("Breakaway");    chk_brk->setChecked(true); chk_brk->setStyleSheet("color: #fb923c; font-weight: bold;");
         auto* chk_jw  = new QCheckBox("jω Crossings"); chk_jw->setChecked(true);  chk_jw->setStyleSheet("color: #38bdf8; font-weight: bold;");
         auto* chk_dep = new QCheckBox("Dep/Arr ∠");    chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
+        chk_tp_show   = new QCheckBox("Test Point");   chk_tp_show->setChecked(true); chk_tp_show->setStyleSheet("color: #facc15; font-weight: bold;");
         auto* fit_btn = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
         plot_hdr->addWidget(plot_title); plot_hdr->addStretch();
         plot_hdr->addWidget(chk_rl); plot_hdr->addWidget(chk_as);
         plot_hdr->addWidget(chk_brk); plot_hdr->addWidget(chk_jw);
+        plot_hdr->addWidget(chk_dep); plot_hdr->addWidget(chk_tp_show);
         plot_hdr->addWidget(fit_btn);
         right_l->addLayout(plot_hdr);
 
@@ -333,6 +348,12 @@ public:
         connect(chk_brk, &QCheckBox::toggled, this, [this](bool v) { canvas->show_breakaway = v; canvas->update(); });
         connect(chk_jw,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_jw_crossings = v; canvas->update(); });
         connect(chk_dep, &QCheckBox::toggled, this, [this](bool v) { canvas->show_dep_arr_angles = v; canvas->update(); });
+        connect(chk_tp_show, &QCheckBox::toggled, this, [this, tp_card, res_card](bool v) {
+            canvas->show_test_point = v;
+            tp_card->setEnabled(v);
+            res_card->setEnabled(v);
+            canvas->update();
+        });
         connect(send_btn, &QPushButton::clicked, this, [this]() {
             if (!std::isfinite(last_gain) || last_gain < 0.0) return;
 
@@ -364,6 +385,7 @@ public:
         });
 
         canvas->onPointSelected = [this](Complex pt) {
+            if (chk_tp_show && !chk_tp_show->isChecked()) return;
             updating_ui = true;
             if (!is_polar_mode) {
                 tp_v1_edit->setText(QString::number(pt.real(), 'g', 4));
@@ -559,6 +581,7 @@ public:
                     .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
             }
             refreshVaryPoleCombo();
+            if (fb_bar) fb_bar->syncToModelS(model);
             evaluateCurrent(true);
         } catch (const std::exception& e) {
             poly_status_lbl->setStyleSheet("color: #ef4444; font-size: 10px; font-weight: bold; border:none;");
@@ -580,10 +603,10 @@ public:
             tp_v2_edit->setText(QString::number(std::arg(model->test_point) * 180.0 / PI, 'g', 4));
         }
         tol_edit->setText(QString::number(model->rl_tol_deg, 'g', 3));
-        updating_ui = false;
-        evaluateCurrent(false);
-        refreshVaryPoleCombo();
         fb_bar->loadFromModelS(model);
+        updating_ui = false;
+        refreshVaryPoleCombo();
+        evaluateCurrent(false);
     }
 
     void evaluateCurrent(bool notify) {
@@ -627,7 +650,8 @@ public:
             loop_zeros = eq.eq_zeros;
         }
 
-        std::string gs_ltx = fb_bar->formatActiveLatexS(model, false);
+        std::string gs_ltx = fb_bar ? fb_bar->formatActiveLatexS(model, false)
+                                    : formatTransferFunctionLatex(model->poles, model->zeros, model->plant_gain, "s", "G");
         if (is_pole_sweep) {
             gs_ltx += " \\; \\mathbf{[Sweep\\; p_" + std::to_string(vary_idx + 1) + " = -a \\; @ \\; K_0 = " + PRECISION.fmt(fixed_k0) + "]}";
         }

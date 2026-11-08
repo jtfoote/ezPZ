@@ -1,7 +1,6 @@
 #pragma once
 #include "RootLocusTab.h"
 
-
 // =============================================================================
 // Tab 2: Time Response & PID Simulator View (With Editable Poles/Zeros + PID Disable)
 // =============================================================================
@@ -77,21 +76,30 @@ public:
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
+        // Editable G(s) Poles (×) & G(s) Zeros (○) Tables directly inside poly_card under G(s)
+        auto* pz_row = new QHBoxLayout();
+        pz_row->setContentsMargins(0, 2, 0, 2);
+        pz_row->setSpacing(6);
+        poles_card = new PoleZeroEditorCard("G(s) Poles (×)", Theme::ACCENT_POLE, -1.0);
+        zeros_card = new PoleZeroEditorCard("G(s) Zeros (○)", Theme::ACCENT_ZERO, -3.0);
+        poles_card->peer_card = zeros_card;
+        zeros_card->peer_card = poles_card;
+        poles_card->syncHeightWithPeer();
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        poly_l->addLayout(pz_row);
+
         fb_bar = new FeedbackConfigBar("s", "H");
         poly_l->addWidget(fb_bar);
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
-        fb_bar->onChanged = [this]() { fb_bar->syncToModelS(model); runSimulation(true); };
+        fb_bar->onChanged = [this]() {
+            if (updating_ui) return;
+            fb_bar->syncToModelS(model);
+            runSimulation(true);
+        };
 
         left_v->addWidget(poly_card);
-
-        // 2. Editable Poles (×) & Zeros (○) Tables Row
-        auto* pz_row = new QHBoxLayout();
-        poles_card = new PoleZeroEditorCard("Poles (×)", Theme::ACCENT_POLE, -1.0);
-        zeros_card = new PoleZeroEditorCard("Zeros (○)", Theme::ACCENT_ZERO, -3.0);
-        pz_row->addWidget(poles_card, 1);
-        pz_row->addWidget(zeros_card, 1);
-        left_v->addLayout(pz_row);
 
         // 3. PID Controller & Bypass / Loop Mode Card
         auto* pid_card = makeCard();
@@ -132,8 +140,6 @@ public:
 
         pid_design_formula_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 9, this);
         pid_design_formula_w->hide();
-        // pid_design_formula_w->setVisible(false);
-        // pid_l->addWidget(pid_design_formula_w);
 
         auto* gains_grid = new QHBoxLayout();
         auto makeGainCol = [&](const QString& title, QLineEdit*& ed, QSlider*& sl, double max_v) {
@@ -179,7 +185,6 @@ public:
         auto* tel_l = new QVBoxLayout(tel_card);
         tel_l->setContentsMargins(10, 6, 10, 6);
 
-        // Compact Full-Width Horizontal Stability Banner (Fixed Height, Never Stretches Vertically!)
         status_banner = new QFrame();
         status_banner->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         status_banner->setFixedHeight(32);
@@ -295,7 +300,6 @@ public:
         bindSliderEdit(kd_slider, kd_edit);
 
         auto applyPidDesign = [this](const ConstraintMatrixAnalysis& ans) {
-            // pid_design_formula_w->setVisible(true);
             pid_design_formula_w->setLatex(QString::fromStdString(ans.formulas_latex));
             updating_ui = true;
             enable_pid_chk->setChecked(true);
@@ -418,6 +422,12 @@ public:
             model->zeros = pn.roots;
             model->poles = pd.roots;
 
+            double ratio = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
+            if (std::abs(ratio) > 1e-12) {
+                model->plant_gain = ratio;
+                gain_edit->setText(QString::number(ratio, 'g', 5));
+            }
+
             if (model->zeros.size() > model->poles.size()) {
                 poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
                 poly_status_lbl->setText(QString("⚠ Improper Plant G(s): deg(Num)=%1 > deg(Den)=%2 (Non-causal derivative action)")
@@ -429,13 +439,9 @@ public:
                     .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
             }
 
-            double ratio = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
-            if (std::abs(ratio) > 1e-12) {
-                model->plant_gain = ratio;
-                gain_edit->setText(QString::number(ratio, 'g', 5));
-            }
             poles_card->setValues(model->poles);
             zeros_card->setValues(model->zeros);
+            if (fb_bar) fb_bar->syncToModelS(model);
             runSimulation(true);
         } catch (const std::exception& e) {
             poly_status_lbl->setText(QString("⚠ %1").arg(e.what()));
@@ -457,10 +463,10 @@ public:
         kp_slider->setValue(static_cast<int>(model->kp * 100));
         ki_slider->setValue(static_cast<int>(model->ki * 100));
         kd_slider->setValue(static_cast<int>(model->kd * 100));
+        fb_bar->loadFromModelS(model);
         updating_ui = false;
         updatePidWidgetsState();
         runSimulation(false);
-        fb_bar->loadFromModelS(model);
     }
 
     void runSimulation(bool notify) {
@@ -469,7 +475,6 @@ public:
         cfg.zeros = model->zeros;
         cfg.plant_gain = parseNumericInput(gain_edit->text().toStdString(), 1.0);
 
-        // ---> IMPROPER TRANSFER FUNCTION CHECK (WITH AUTO-CLEAR) <---
         bool is_improper = (cfg.zeros.size() > cfg.poles.size());
         if (is_improper) {
             poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
@@ -481,7 +486,6 @@ public:
                 .arg(cfg.poles.size()).arg(cfg.zeros.size())
                 .arg(QString::fromStdString(PRECISION.fmt(cfg.plant_gain))));
         }
-        // ---> END IMPROPER CHECK <---
 
         cfg.unity_feedback = model->unity_feedback_s;
         cfg.h_poles = model->h_poles;
@@ -516,7 +520,6 @@ public:
             model->notify("pid_sim");
         }
 
-        // Style Compact Full-Width Stability Banner (Turns Amber if Improper OR Marginal/Unstable!)
         bool is_stable = (res.stability_state == "STABLE");
         bool banner_ok = is_stable && !is_improper;
         QString bg = banner_ok ? Theme::BANNER_OK_BG : Theme::BANNER_WARN_BG;
@@ -589,4 +592,3 @@ public:
         canvas->update();
     }
 };
-

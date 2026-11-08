@@ -42,7 +42,10 @@ public:
     QWidget *custom_row;
     QString domain_var;
     bool updating = false;
+    bool p_cards_authoritative = false;
     std::function<void()> onChanged;
+    PoleZeroEditorCard* h_poles_card = nullptr;
+    PoleZeroEditorCard* h_zeros_card = nullptr;
 
     explicit FeedbackConfigBar(const QString& var_sym = "s", const QString& fb_sym = "H", QWidget* parent = nullptr)
         : QWidget(parent), domain_var(var_sym)
@@ -78,17 +81,46 @@ public:
         vl->addLayout(top_r);
 
         custom_row = new QWidget();
-        auto* cr_l = new QHBoxLayout(custom_row);
+        custom_row->setStyleSheet("background: transparent; border: none;");
+        auto* cr_vl = new QVBoxLayout(custom_row);
+        cr_vl->setContentsMargins(0, 2, 0, 0);
+        cr_vl->setSpacing(4);
+
+        // Tier 1: Num_H and Den_H polynomial inputs
+        auto* cr_l = new QHBoxLayout();
         cr_l->setContentsMargins(0, 0, 0, 0);
         cr_l->setSpacing(6);
-        auto* nl = new QLabel(QString("Num_%1(%2):").arg(fb_sym, var_sym));
-        nl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ASYMP));
-        h_num_edit = makeDarkEntry("1", 70);
-        auto* dl = new QLabel(QString("Den_%1(%2):").arg(fb_sym, var_sym));
-        dl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_LOCUS));
-        h_den_edit = makeDarkEntry(var_sym == "s" ? "s + 5" : "z - 0.5", 70);
-        cr_l->addWidget(nl); cr_l->addWidget(h_num_edit, 1);
-        cr_l->addWidget(dl); cr_l->addWidget(h_den_edit, 1);
+
+        auto* nh_lbl = new QLabel(QString("Num_%1(%2):").arg(fb_sym, var_sym));
+        nh_lbl->setStyleSheet("color: #34d399; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
+        h_num_edit = makeDarkEntry("1");
+
+        auto* dh_lbl = new QLabel(QString("Den_%1(%2):").arg(fb_sym, var_sym));
+        dh_lbl->setStyleSheet("color: #a78bfa; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
+        h_den_edit = makeDarkEntry("1");
+
+        auto* solve_h_btn = makeActionBtn("Solve H ➔", Theme::ACCENT_PID);
+
+        cr_l->addWidget(nh_lbl);
+        cr_l->addWidget(h_num_edit, 1);
+        cr_l->addWidget(dh_lbl);
+        cr_l->addWidget(h_den_edit, 1);
+        cr_l->addWidget(solve_h_btn);
+        cr_vl->addLayout(cr_l);
+
+        // Tier 2: Editable H(s) / H_fb(z) Poles (×) & Zeros (○) Tables
+        auto* hpz_row = new QHBoxLayout();
+        hpz_row->setContentsMargins(0, 2, 0, 0);
+        hpz_row->setSpacing(6);
+        QString h_tag = QString("%1(%2)").arg(fb_sym, var_sym);
+        double def_hp = (var_sym == "z") ? 0.5 : -2.0;
+        double def_hz = (var_sym == "z") ? 0.2 : -4.0;
+        h_poles_card = new PoleZeroEditorCard(h_tag + " Poles (×)", Theme::ACCENT_POLE, def_hp);
+        h_zeros_card = new PoleZeroEditorCard(h_tag + " Zeros (○)", Theme::ACCENT_ZERO, def_hz);
+        hpz_row->addWidget(h_poles_card, 1);
+        hpz_row->addWidget(h_zeros_card, 1);
+        cr_vl->addLayout(hpz_row);
+
         custom_row->setVisible(false);
         vl->addWidget(custom_row);
 
@@ -106,10 +138,45 @@ public:
             ).arg(Theme::BG_INPUT, show_closed_loop_ts ? Theme::ACCENT_PID : Theme::ACCENT_ZERO));
             if (!updating && onChanged) onChanged();
         });
-        connect(h_num_edit, &QLineEdit::editingFinished, this, [this]() { if (!updating && onChanged) onChanged(); });
-        connect(h_den_edit, &QLineEdit::editingFinished, this, [this]() { if (!updating && onChanged) onChanged(); });
-        connect(h_num_edit, &QLineEdit::returnPressed,   this, [this]() { if (!updating && onChanged) onChanged(); });
-        connect(h_den_edit, &QLineEdit::returnPressed,   this, [this]() { if (!updating && onChanged) onChanged(); });
+
+        auto onPolyEdited = [this]() {
+            if (updating) return;
+            updating = true;
+            try {
+                auto pn = parsePolynomialInput(h_num_edit->text().toStdString());
+                auto pd = parsePolynomialInput(h_den_edit->text().toStdString());
+                if (h_zeros_card) h_zeros_card->setValues(pn.roots);
+                if (h_poles_card) h_poles_card->setValues(pd.roots);
+            } catch (...) {}
+            updating = false;
+            if (onChanged) onChanged();
+        };
+
+        connect(h_num_edit, &QLineEdit::returnPressed, this, onPolyEdited);
+        connect(h_den_edit, &QLineEdit::returnPressed, this, onPolyEdited);
+        connect(solve_h_btn, &QPushButton::clicked, this, onPolyEdited);
+
+        h_poles_card->onValuesChanged = [this]() {
+            if (updating) return;
+            updating = true;
+            p_cards_authoritative = true;
+            h_den_edit->setText(QString::fromStdString(
+                formatPolynomialFromRoots(h_poles_card->getValues(), domain_var.toStdString())));
+            updating = false;
+            if (onChanged) onChanged();
+            p_cards_authoritative = false;
+        };
+
+        h_zeros_card->onValuesChanged = [this]() {
+            if (updating) return;
+            updating = true;
+            p_cards_authoritative = true;
+            h_num_edit->setText(QString::fromStdString(
+                formatPolynomialFromRoots(h_zeros_card->getValues(), domain_var.toStdString())));
+            updating = false;
+            if (onChanged) onChanged();
+            p_cards_authoritative = false;
+        };
     }
 
     // Helper: returns either "G(s) = ..., H(s) = ..." OR "T(s) = Num_T(s) / Den_T(s)" based on toggle!
@@ -117,9 +184,9 @@ public:
         if (!show_closed_loop_ts) {
             std::string gs_ltx = formatTransferFunctionLatex(m->poles, m->zeros, m->plant_gain, "s", "G");
             if (!m->unity_feedback_s) {
-                gs_ltx += " , \\quad " + formatTransferFunctionLatex(m->h_poles, m->h_zeros, m->h_gain, "s", "H");
+                gs_ltx += " , " + formatTransferFunctionLatex(m->h_poles, m->h_zeros, m->h_gain, "s", "H");
             } else {
-                gs_ltx += " , \\quad H(s) = 1";
+                gs_ltx += " , H(s) = 1";
             }
             return gs_ltx;
         }
@@ -148,9 +215,9 @@ public:
         if (!show_closed_loop_ts) {
             std::string hz_ltx = formatTransferFunctionLatex(m->z_poles, m->z_zeros, m->filter_gain, "z", "H");
             if (!m->unity_feedback_z) {
-                hz_ltx += " , \\quad " + formatTransferFunctionLatex(m->hz_fb_poles, m->hz_fb_zeros, m->hz_fb_gain, "z", "H_{\\mathrm{fb}}");
+                hz_ltx += " , " + formatTransferFunctionLatex(m->hz_fb_poles, m->hz_fb_zeros, m->hz_fb_gain, "z", "H_{\\mathrm{fb}}");
             } else {
-                hz_ltx += " , \\quad H_{\\mathrm{fb}}(z) = 1";
+                hz_ltx += " , H_{\\mathrm{fb}}(z) = 1";
             }
             return hz_ltx;
         }
@@ -169,13 +236,25 @@ public:
         m->h_num_str = h_num_edit->text().toStdString();
         m->h_den_str = h_den_edit->text().toStdString();
         if (!m->unity_feedback_s) {
-            try {
-                auto pn = parsePolynomialInput(m->h_num_str);
-                auto pd = parsePolynomialInput(m->h_den_str);
-                m->h_zeros = pn.roots;
-                m->h_poles = pd.roots;
-                m->h_gain  = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
-            } catch (...) {}
+            if (p_cards_authoritative && h_poles_card && h_zeros_card) {
+                m->h_poles = h_poles_card->getValues();
+                m->h_zeros = h_zeros_card->getValues();
+            } else {
+                try {
+                    auto pn = parsePolynomialInput(m->h_num_str);
+                    auto pd = parsePolynomialInput(m->h_den_str);
+                    m->h_zeros = pn.roots;
+                    m->h_poles = pd.roots;
+                    m->h_gain  = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
+                    updating = true;
+                    if (h_poles_card) h_poles_card->setValues(m->h_poles);
+                    if (h_zeros_card) h_zeros_card->setValues(m->h_zeros);
+                    updating = false;
+                } catch (...) {
+                    if (h_poles_card) m->h_poles = h_poles_card->getValues();
+                    if (h_zeros_card) m->h_zeros = h_zeros_card->getValues();
+                }
+            }
         }
     }
 
@@ -186,6 +265,8 @@ public:
         custom_row->setVisible(!m->unity_feedback_s);
         h_num_edit->setText(QString::fromStdString(m->h_num_str));
         h_den_edit->setText(QString::fromStdString(m->h_den_str));
+        if (h_poles_card) h_poles_card->setValues(m->h_poles);
+        if (h_zeros_card) h_zeros_card->setValues(m->h_zeros);
         updating = false;
     }
 
@@ -194,13 +275,25 @@ public:
         m->hz_fb_num_str = h_num_edit->text().toStdString();
         m->hz_fb_den_str = h_den_edit->text().toStdString();
         if (!m->unity_feedback_z) {
-            try {
-                auto pn = parsePolynomialInput(m->hz_fb_num_str);
-                auto pd = parsePolynomialInput(m->hz_fb_den_str);
-                m->hz_fb_zeros = pn.roots;
-                m->hz_fb_poles = pd.roots;
-                m->hz_fb_gain  = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
-            } catch (...) {}
+            if (p_cards_authoritative && h_poles_card && h_zeros_card) {
+                m->hz_fb_poles = h_poles_card->getValues();
+                m->hz_fb_zeros = h_zeros_card->getValues();
+            } else {
+                try {
+                    auto pn = parsePolynomialInput(m->hz_fb_num_str);
+                    auto pd = parsePolynomialInput(m->hz_fb_den_str);
+                    m->hz_fb_zeros = pn.roots;
+                    m->hz_fb_poles = pd.roots;
+                    m->hz_fb_gain  = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
+                    updating = true;
+                    if (h_poles_card) h_poles_card->setValues(m->hz_fb_poles);
+                    if (h_zeros_card) h_zeros_card->setValues(m->hz_fb_zeros);
+                    updating = false;
+                } catch (...) {
+                    if (h_poles_card) m->hz_fb_poles = h_poles_card->getValues();
+                    if (h_zeros_card) m->hz_fb_zeros = h_zeros_card->getValues();
+                }
+            }
         }
     }
 
@@ -211,6 +304,8 @@ public:
         custom_row->setVisible(!m->unity_feedback_z);
         h_num_edit->setText(QString::fromStdString(m->hz_fb_num_str));
         h_den_edit->setText(QString::fromStdString(m->hz_fb_den_str));
+        if (h_poles_card) h_poles_card->setValues(m->hz_fb_poles);
+        if (h_zeros_card) h_zeros_card->setValues(m->hz_fb_zeros);
         updating = false;
     }
 };
@@ -832,6 +927,9 @@ private:
         auto* hpz_row = new QHBoxLayout();
         h_poles_card = new PoleZeroEditorCard("H(s) Poles (×)", Theme::ACCENT_POLE, -1.0);
         h_zeros_card = new PoleZeroEditorCard("H(s) Zeros (○)", Theme::ACCENT_ZERO, -2.0);
+        h_poles_card->peer_card = h_zeros_card;
+        h_zeros_card->peer_card = h_poles_card;
+        h_poles_card->syncHeightWithPeer();
         hpz_row->addWidget(h_poles_card, 1);
         hpz_row->addWidget(h_zeros_card, 1);
         left_v->addLayout(hpz_row);
@@ -1013,20 +1111,19 @@ private:
         h_poles_card->onValuesChanged = [this]() {
             if (updating) return;
             model->h_poles = h_poles_card->getValues();
-            model->unity_feedback_s = false;
             model->h_den_str = formatPolynomialFromRoots(model->h_poles, "s");
-            den_h_edit->setText(QString::fromStdString(model->h_den_str));
+            refreshEvaluation();
             refreshFeedbackPage();
-            model->notify("feedback_dlg");
+            model->notify("design_dialog");
         };
+
         h_zeros_card->onValuesChanged = [this]() {
             if (updating) return;
             model->h_zeros = h_zeros_card->getValues();
-            model->unity_feedback_s = false;
             model->h_num_str = formatPolynomialFromRoots(model->h_zeros, "s");
-            num_h_edit->setText(QString::fromStdString(model->h_num_str));
+            refreshEvaluation();
             refreshFeedbackPage();
-            model->notify("feedback_dlg");
+            model->notify("design_dialog");
         };
 
         auto applyGPoly = [this]() {

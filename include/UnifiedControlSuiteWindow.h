@@ -26,11 +26,11 @@ public:
     SignalPlotterTab* sig_tab;
 
     explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle("Control Systems, Digital Filter, Block Diagram & Scientific Calculator Suite");
+        setWindowTitle("PZSuite");
         resize(900, 600);
         setStyleSheet(QString("QMainWindow { background-color: %1; }").arg(Theme::BG_WINDOW));
 
-        QSettings settings("ControlSuite", "ControlSystemsSuite");
+        QSettings settings("ControlSuite", "PZSuite");
         model.loadFromSettings(settings);
         int saved_theme = model.theme_index;
         Theme::setTheme(0);
@@ -406,7 +406,7 @@ public:
     }
 
     void closeEvent(QCloseEvent* event) override {
-        QSettings settings("ControlSuite", "ControlSystemsSuite");
+        QSettings settings("ControlSuite", "PZSuite");
         model.saveToSettings(settings);
         settings.setValue("calc/expressions", calc_tab->getExpressions());
         settings.setValue("win/active_tab", stack->currentIndex());

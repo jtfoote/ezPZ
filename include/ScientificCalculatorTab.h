@@ -726,6 +726,10 @@ public:
         QPushButton* frac_btn;
         QLabel* res_lbl;
         bool use_frac = false;
+        QWidget* res_container = nullptr;
+        QHBoxLayout* inline_slot = nullptr;
+        QHBoxLayout* wrapped_slot = nullptr;
+        QWidget* wrapped_row_w = nullptr;
     };
 
     SharedSystemModel* model;
@@ -1297,33 +1301,73 @@ public:
 
     void addRow(const QString& init_expr, bool focus_new = true) {
         auto* row_w = new QFrame();
+        row_w->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Minimum);
         row_w->setStyleSheet(QString("QFrame { background-color: %1; border: 1px solid %2; border-radius: 4px; }")
                              .arg(Theme::BG_PANEL_ALT, Theme::BORDER_PANEL));
-        auto* hl = new QHBoxLayout(row_w);
-        hl->setContentsMargins(8, 4, 8, 4);
+
+        auto* outer_vl = new QVBoxLayout(row_w);
+        outer_vl->setContentsMargins(8, 4, 8, 4);
+        outer_vl->setSpacing(3);
+
+        // Top line: Row # + Expression Input + Math Preview + (Inline Answer if short)
+        auto* top_hl = new QHBoxLayout();
+        top_hl->setContentsMargins(0, 0, 0, 0);
+        top_hl->setSpacing(6);
 
         auto* idx_l = new QLabel(QString::number(rows.size() + 1));
         idx_l->setFixedWidth(20);
         idx_l->setStyleSheet("color: #64748b; font-family: Monospace; font-weight: bold; border:none;");
 
-        auto* ed = makeDarkEntry(init_expr, 180);
-        ed->installEventFilter(this); // Track when user clicks into this row
+        auto* ed = makeDarkEntry(init_expr, 140);
+        ed->setMinimumWidth(120);
+        ed->installEventFilter(this);
 
         auto* math_prev = new MathFormulaWidget("", QColor(Theme::ACCENT_LOCUS), QColor(Theme::BG_PANEL_ALT), 9);
+        math_prev->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Minimum);
+
+        // Answer bundle (a/b button + result label) that can sit inline OR drop to line 2
+        auto* res_cont = new QWidget();
+        res_cont->setStyleSheet("background: transparent; border: none;");
+        auto* res_hl = new QHBoxLayout(res_cont);
+        res_hl->setContentsMargins(0, 0, 0, 0);
+        res_hl->setSpacing(6);
+
         auto* frac_btn = makeActionBtn("a/b", Theme::TEXT_SECONDARY, Theme::BG_PANEL);
         frac_btn->setVisible(false);
         auto* res_l = new QLabel("= —");
+        res_l->setWordWrap(true);
         res_l->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
 
-        hl->addWidget(idx_l);
-        hl->addWidget(ed, 1);
-        hl->addWidget(math_prev);
-        hl->addWidget(frac_btn);
-        hl->addWidget(res_l);
+        res_hl->addWidget(frac_btn);
+        res_hl->addWidget(res_l);
+
+        auto* inline_slot = new QHBoxLayout();
+        inline_slot->setContentsMargins(0, 0, 0, 0);
+        inline_slot->addWidget(res_cont);
+
+        top_hl->addWidget(idx_l);
+        top_hl->addWidget(ed, 1);
+        top_hl->addWidget(math_prev);
+        top_hl->addLayout(inline_slot);
+        outer_vl->addLayout(top_hl);
+
+        // Second line (hidden unless LaTeX or Answer is wide)
+        auto* wrap_w = new QWidget();
+        wrap_w->setStyleSheet("background: transparent; border: none;");
+        auto* wrap_hl = new QHBoxLayout(wrap_w);
+        wrap_hl->setContentsMargins(26, 2, 0, 0);
+        wrap_hl->setSpacing(8);
+        wrap_hl->addStretch();
+        auto* wrapped_slot = new QHBoxLayout();
+        wrapped_slot->setContentsMargins(0, 0, 0, 0);
+        wrap_hl->addLayout(wrapped_slot);
+        wrap_w->setVisible(false);
+        outer_vl->addWidget(wrap_w);
+
         rows_layout->addWidget(row_w);
 
         size_t r_idx = rows.size();
-        rows.push_back({row_w, ed, math_prev, frac_btn, res_l, false});
+        rows.push_back({row_w, ed, math_prev, frac_btn, res_l, false, res_cont, inline_slot, wrapped_slot, wrap_w});
         active_edit = ed;
 
         connect(ed, &QLineEdit::textChanged, this, &ScientificCalculatorTab::evaluateAll);
@@ -1349,8 +1393,8 @@ public:
         });
 
         if (focus_new) {
-            ed->setFocus();
-            active_edit = ed;
+            ed->setFocus(Qt::OtherFocusReason);
+            ed->setCursorPosition(ed->text().length());
             scrollToActiveRow();
         }
     }
@@ -1427,6 +1471,7 @@ public:
                 r.math_prev->setVisible(false);
                 r.frac_btn->setVisible(false);
                 r.res_lbl->setText("");
+                if (r.wrapped_row_w) r.wrapped_row_w->setVisible(false);
                 continue;
             }
             auto out = engine.evalLine(txt);
@@ -1451,6 +1496,23 @@ public:
                 r.frac_btn->setVisible(false);
                 r.res_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 11px; border:none;").arg(Theme::ACCENT_OPEN));
                 r.res_lbl->setText(QString::fromStdString("⚠ " + out.error_msg));
+            }
+            // Check if the LaTeX preview + Answer is too wide for a single line
+            int latex_w = (show_latex_preview && r.math_prev->isVisible()) ? r.math_prev->sizeHint().width() : 0;
+            int ans_w   = r.res_lbl->fontMetrics().horizontalAdvance(r.res_lbl->text()) + (r.frac_btn->isVisible() ? 45 : 0);
+            int avail_w = (r.frame->width() > 200) ? r.frame->width() : 520;
+
+            bool needs_wrap = (latex_w + ans_w > avail_w - 190) || (ans_w > 220) || (latex_w > 180);
+            if (r.inline_slot && r.wrapped_slot && r.wrapped_row_w && r.res_container) {
+                r.inline_slot->removeWidget(r.res_container);
+                r.wrapped_slot->removeWidget(r.res_container);
+                if (needs_wrap) {
+                    r.wrapped_slot->addWidget(r.res_container);
+                    r.wrapped_row_w->setVisible(true);
+                } else {
+                    r.inline_slot->addWidget(r.res_container);
+                    r.wrapped_row_w->setVisible(false);
+                }
             }
         }
         live_vars_lbl->setText(QString(

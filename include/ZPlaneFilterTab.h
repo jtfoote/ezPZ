@@ -17,6 +17,7 @@ public:
     PoleZeroEditorCard *poles_card, *zeros_card;
     QComboBox *preset_combo;
     QRadioButton *cart_radio, *polar_radio;
+    QCheckBox* chk_tp_show = nullptr;
     bool is_polar_mode = false;
 
     QFrame* rl_banner;
@@ -64,21 +65,30 @@ public:
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
+        // 2. Editable H(z) z-Poles (×) & z-Zeros (○) Tables directly inside poly_card
+        auto* pz_row = new QHBoxLayout();
+        pz_row->setContentsMargins(0, 2, 0, 2);
+        pz_row->setSpacing(6);
+        poles_card = new PoleZeroEditorCard("H(z) z-Poles (×)", Theme::ACCENT_POLE, 0.6);
+        zeros_card = new PoleZeroEditorCard("H(z) z-Zeros (○)", Theme::ACCENT_ZERO, -1.0);
+        poles_card->peer_card = zeros_card;
+        zeros_card->peer_card = poles_card;
+        poles_card->syncHeightWithPeer();
+        pz_row->addWidget(poles_card, 1);
+        pz_row->addWidget(zeros_card, 1);
+        poly_l->addLayout(pz_row);
+
         fb_bar = new FeedbackConfigBar("z", "H_fb");
         poly_l->addWidget(fb_bar);
-        fb_bar->onChanged = [this]() { fb_bar->syncToModelZ(model); evaluateCurrent(true); };
+        fb_bar->onChanged = [this]() {
+            if (updating_ui) return;
+            fb_bar->syncToModelZ(model);
+            evaluateCurrent(true);
+        };
 
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ASYMP), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
         left_v->addWidget(poly_card);
-
-        // 2. Editable z-Poles (×) & z-Zeros (○) Tables Row
-        auto* pz_row = new QHBoxLayout();
-        poles_card = new PoleZeroEditorCard("z-Poles (×)", Theme::ACCENT_POLE, 0.6);
-        zeros_card = new PoleZeroEditorCard("z-Zeros (○)", Theme::ACCENT_ZERO, -1.0);
-        pz_row->addWidget(poles_card, 1);
-        pz_row->addWidget(zeros_card, 1);
-        left_v->addLayout(pz_row);
 
         // 3. Digital Filter Synthesizer & Test Point z Card
         auto* synth_card = makeCard();
@@ -188,13 +198,16 @@ public:
         auto* phdr = new QHBoxLayout();
         auto* pt = new QLabel("Complex z-Plane & Unit Circle Filter Diagram");
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
-        auto* chk_uc = new QCheckBox("Unit Circle |z|=1"); chk_uc->setChecked(true); chk_uc->setStyleSheet("color: #22d3ee; font-weight: bold;");
-        auto* chk_zg = new QCheckBox("ζ/ωn Grid"); chk_zg->setChecked(true); chk_zg->setStyleSheet("color: #34d399; font-weight: bold;");
-        auto* chk_rl = new QCheckBox("Root Locus"); chk_rl->setChecked(true); chk_rl->setStyleSheet("color: #a855f7; font-weight: bold;");
-        auto* chk_dep = new QCheckBox("Dep/Arr ∠"); chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
-        auto* fit_b  = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        auto* chk_uc  = new QCheckBox("Unit Circle |z|=1"); chk_uc->setChecked(true);  chk_uc->setStyleSheet("color: #22d3ee; font-weight: bold;");
+        auto* chk_zg  = new QCheckBox("ζ/ωn Grid");         chk_zg->setChecked(true);  chk_zg->setStyleSheet("color: #34d399; font-weight: bold;");
+        auto* chk_rl  = new QCheckBox("Root Locus");        chk_rl->setChecked(true);  chk_rl->setStyleSheet("color: #a855f7; font-weight: bold;");
+        auto* chk_dep = new QCheckBox("Dep/Arr ∠");         chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
+        chk_tp_show   = new QCheckBox("Test Point");        chk_tp_show->setChecked(true); chk_tp_show->setStyleSheet("color: #facc15; font-weight: bold;");
+        auto* fit_b   = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
         phdr->addWidget(pt); phdr->addStretch();
-        phdr->addWidget(chk_uc); phdr->addWidget(chk_zg); phdr->addWidget(chk_rl); phdr->addWidget(fit_b);
+        phdr->addWidget(chk_uc); phdr->addWidget(chk_zg);
+        phdr->addWidget(chk_rl); phdr->addWidget(chk_dep);
+        phdr->addWidget(chk_tp_show); phdr->addWidget(fit_b);
         right_l->addLayout(phdr);
 
         canvas = new ComplexPlaneCanvas(true);
@@ -261,16 +274,26 @@ public:
         for (auto* ed : {kd_edit, ts_edit, tp_v1_edit, tp_v2_edit, tol_edit}) {
             connect(ed, &QLineEdit::textEdited, this, [this]() { if (!updating_ui) evaluateCurrent(true); });
         }
-        connect(chk_uc, &QCheckBox::toggled, this, [this](bool v) { canvas->show_unit_circle = v; canvas->update(); });
-        connect(chk_zg, &QCheckBox::toggled, this, [this](bool v) { canvas->show_zgrid = v; canvas->update(); });
-        connect(chk_rl, &QCheckBox::toggled, this, [this](bool v) { canvas->show_locus = v; canvas->update(); });
+        connect(chk_uc,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_unit_circle = v; canvas->update(); });
+        connect(chk_zg,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_zgrid = v; canvas->update(); });
+        connect(chk_rl,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_locus = v; canvas->update(); });
         connect(chk_dep, &QCheckBox::toggled, this, [this](bool v) { canvas->show_dep_arr_angles = v; canvas->update(); });
-        connect(fit_b,  &QPushButton::clicked, this, [this]() { canvas->resetView(); });
+        connect(chk_tp_show, &QCheckBox::toggled, this, [this](bool v) {
+            canvas->show_test_point = v;
+            tp_v1_edit->setEnabled(v);
+            tp_v2_edit->setEnabled(v);
+            tol_edit->setEnabled(v);
+            cart_radio->setEnabled(v);
+            polar_radio->setEnabled(v);
+            canvas->update();
+        });
+        connect(fit_b,   &QPushButton::clicked, this, [this]() { canvas->resetView(); });
         connect(send_btn, &QPushButton::clicked, this, [this]() {
             if (onSendToDiscreteSim) onSendToDiscreteSim(model->filter_gain);
         });
 
         canvas->onPointSelected = [this](Complex zt) {
+            if (chk_tp_show && !chk_tp_show->isChecked()) return;
             updating_ui = true;
             if (!is_polar_mode) {
                 tp_v1_edit->setText(QString::number(zt.real(), 'g', 4));
@@ -314,9 +337,9 @@ public:
             auto pn = parsePolynomialInput(num_edit->text().toStdString());
             auto pd = parsePolynomialInput(den_edit->text().toStdString());
             if (std::abs(pd.leading_gain) <= 1e-14)
-                throw std::runtime_error("Divide by zero: Den(s) cannot be 0.");
+                throw std::runtime_error("Divide by zero: Den(z) cannot be 0.");
             if (std::abs(pn.leading_gain) <= 1e-14)
-                throw std::runtime_error("Zero numerator: Num(s) cannot be 0.");
+                throw std::runtime_error("Zero numerator: Num(z) cannot be 0.");
             model->z_zeros = pn.roots;
             model->z_poles = pd.roots;
 
@@ -332,7 +355,7 @@ public:
 
             poles_card->setValues(model->z_poles);
             zeros_card->setValues(model->z_zeros);
-            poly_status_lbl->setText(QString("✔ Solved %1 z-Poles & %2 z-Zeros").arg(model->z_poles.size()).arg(model->z_zeros.size()));
+            if (fb_bar) fb_bar->syncToModelZ(model);
             evaluateCurrent(true);
         } catch (const std::exception& e) {
             poly_status_lbl->setText(QString("⚠ Polynomial error: %1").arg(e.what()));
@@ -355,9 +378,9 @@ public:
             tp_v2_edit->setText(QString::number(std::arg(model->z_test_point) * 180.0 / PI, 'g', 4));
         }
         tol_edit->setText(QString::number(model->z_rl_tol_deg, 'g', 3));
+        fb_bar->loadFromModelZ(model);
         updating_ui = false;
         evaluateCurrent(false);
-        fb_bar->loadFromModelZ(model);
     }
 
     void evaluateCurrent(bool notify) {
@@ -439,4 +462,3 @@ public:
         if (notify) model->notify("z_plane");
     }
 };
-
