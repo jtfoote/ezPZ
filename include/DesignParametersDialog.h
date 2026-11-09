@@ -183,6 +183,9 @@ public:
     std::string formatActiveLatexS(const SharedSystemModel* m, bool include_pid = false) const {
         if (!show_closed_loop_ts) {
             std::string gs_ltx = formatTransferFunctionLatex(m->poles, m->zeros, m->plant_gain, "s", "G");
+            if (m->comp_enabled_s) {
+                gs_ltx = formatTransferFunctionLatex(m->c_poles, m->c_zeros, m->c_gain, "s", "G_c") + " , " + gs_ltx;
+            }
             if (!m->unity_feedback_s) {
                 gs_ltx += " , " + formatTransferFunctionLatex(m->h_poles, m->h_zeros, m->h_gain, "s", "H");
             } else {
@@ -191,12 +194,17 @@ public:
             return gs_ltx;
         }
         auto [num_g, den_g] = ComplexTransferFunctionSimulator::buildPlantPolynomials(m->poles, m->zeros, m->plant_gain);
+        if (m->comp_enabled_s && (!include_pid || m->isFinitePoleCompensatorS())) {
+            auto [num_gc, den_gc] = ComplexTransferFunctionSimulator::buildPlantPolynomials(m->c_poles, m->c_zeros, m->c_gain);
+            num_g = polyMul(num_gc, num_g);
+            den_g = polyMul(den_gc, den_g);
+        }
         std::vector<Complex> num_h = {Complex(1.0, 0.0)}, den_h = {Complex(1.0, 0.0)};
         if (!m->unity_feedback_s) {
             std::tie(num_h, den_h) = ComplexTransferFunctionSimulator::buildPlantPolynomials(m->h_poles, m->h_zeros, m->h_gain);
         }
         std::vector<Complex> num_c = {Complex(1.0, 0.0)}, den_c = {Complex(1.0, 0.0)};
-        if (include_pid && m->pid_enabled) {
+        if (include_pid && m->pid_enabled && !m->isFinitePoleCompensatorS()) {
             if (std::abs(m->ki) > 1e-7) {
                 num_c = {Complex(m->kd, 0.0), Complex(m->kp, 0.0), Complex(m->ki, 0.0)};
                 den_c = {Complex(1.0, 0.0), Complex(0.0, 0.0)};
@@ -306,6 +314,170 @@ public:
         h_den_edit->setText(QString::fromStdString(m->hz_fb_den_str));
         if (h_poles_card) h_poles_card->setValues(m->hz_fb_poles);
         if (h_zeros_card) h_zeros_card->setValues(m->hz_fb_zeros);
+        updating = false;
+    }
+};
+
+// =============================================================================
+// Dedicated Series Controller / Compensator Block: Gc(s) = Kc * Num_c(s) / Den_c(s)
+// =============================================================================
+class CompensatorConfigCard : public QFrame {
+    Q_OBJECT
+public:
+    QCheckBox* enable_chk;
+    QLineEdit *c_num_edit, *c_den_edit, *kc_edit;
+    QWidget* body_w;
+    PoleZeroEditorCard *c_poles_card, *c_zeros_card;
+    bool updating = false;
+    bool p_cards_authoritative = false;
+    std::function<void()> onChanged;
+
+    explicit CompensatorConfigCard(QWidget* parent = nullptr) : QFrame(parent) {
+        setStyleSheet(QString("QFrame { background-color: %1; border: 1px solid %2; border-radius: 6px; }")
+                      .arg(Theme::BG_PANEL, Theme::BORDER_PANEL));
+        auto* vl = new QVBoxLayout(this);
+        vl->setContentsMargins(10, 6, 10, 6);
+        vl->setSpacing(4);
+
+        // Header Row: Title + Enable Checkbox + Quick Solve
+        auto* hdr = new QHBoxLayout();
+        auto* title = new QLabel("Controller / Compensator  Gc(s) = Kc · Num_c(s) / Den_c(s)");
+        title->setStyleSheet("color: #34d399; font-weight: bold; font-size: 11px; border: none;");
+
+        enable_chk = new QCheckBox("Enable Gc(s)");
+        enable_chk->setChecked(false);
+        enable_chk->setStyleSheet("QCheckBox { color: #34d399; font-weight: bold; font-size: 11px; border: none; }");
+
+        hdr->addWidget(title);
+        hdr->addStretch();
+        hdr->addWidget(enable_chk);
+        vl->addLayout(hdr);
+
+        // Collapsible Body (Visible when Enable Gc(s) is checked, or always accessible)
+        body_w = new QWidget();
+        body_w->setStyleSheet("background: transparent; border: none;");
+        auto* bl = new QVBoxLayout(body_w);
+        bl->setContentsMargins(0, 2, 0, 0);
+        bl->setSpacing(4);
+
+        auto* p_row = new QHBoxLayout();
+        p_row->setSpacing(6);
+        auto* nc_l = new QLabel("Num_c(s):");
+        nc_l->setStyleSheet("color: #34d399; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
+        c_num_edit = makeDarkEntry("1");
+
+        auto* dc_l = new QLabel("Den_c(s):");
+        dc_l->setStyleSheet("color: #a78bfa; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
+        c_den_edit = makeDarkEntry("1");
+
+        auto* kc_l = new QLabel("Kc:");
+        kc_l->setStyleSheet("color: #facc15; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
+        kc_edit = makeDarkEntry("1.0", 48);
+
+        auto* solve_c_btn = makeActionBtn("Solve Gc ➔", Theme::ACCENT_PID);
+
+        p_row->addWidget(nc_l); p_row->addWidget(c_num_edit, 1);
+        p_row->addWidget(dc_l); p_row->addWidget(c_den_edit, 1);
+        p_row->addWidget(kc_l); p_row->addWidget(kc_edit);
+        p_row->addWidget(solve_c_btn);
+        bl->addLayout(p_row);
+
+        // Editable Gc(s) Poles (×) & Gc(s) Zeros (○) Tables
+        auto* cpz_row = new QHBoxLayout();
+        cpz_row->setContentsMargins(0, 2, 0, 0);
+        cpz_row->setSpacing(6);
+        c_poles_card = new PoleZeroEditorCard("Gc(s) Poles (×)", "#a78bfa", -4.0);
+        c_zeros_card = new PoleZeroEditorCard("Gc(s) Zeros (○)", "#34d399", -2.0);
+        c_poles_card->peer_card = c_zeros_card;
+        c_zeros_card->peer_card = c_poles_card;
+        c_poles_card->syncHeightWithPeer();
+        cpz_row->addWidget(c_poles_card, 1);
+        cpz_row->addWidget(c_zeros_card, 1);
+        bl->addLayout(cpz_row);
+
+        body_w->setEnabled(false);
+        vl->addWidget(body_w);
+
+        connect(enable_chk, &QCheckBox::toggled, this, [this](bool en) {
+            body_w->setEnabled(en);
+            if (!updating && onChanged) onChanged();
+        });
+
+        auto onPolyEdited = [this]() {
+            if (updating) return;
+            updating = true;
+            try {
+                auto pn = parsePolynomialInput(c_num_edit->text().toStdString());
+                auto pd = parsePolynomialInput(c_den_edit->text().toStdString());
+                c_zeros_card->setValues(pn.roots);
+                c_poles_card->setValues(pd.roots);
+            } catch (...) {}
+            updating = false;
+            if (onChanged) onChanged();
+        };
+
+        connect(c_num_edit, &QLineEdit::returnPressed, this, onPolyEdited);
+        connect(c_den_edit, &QLineEdit::returnPressed, this, onPolyEdited);
+        connect(kc_edit,    &QLineEdit::editingFinished, this, [this]() {
+            if (!updating && onChanged) onChanged();
+        });
+        connect(solve_c_btn, &QPushButton::clicked, this, onPolyEdited);
+
+        c_poles_card->onValuesChanged = [this]() {
+            if (updating) return;
+            updating = true;
+            p_cards_authoritative = true;
+            c_den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(c_poles_card->getValues(), "s")));
+            updating = false;
+            if (onChanged) onChanged();
+            p_cards_authoritative = false;
+        };
+
+        c_zeros_card->onValuesChanged = [this]() {
+            if (updating) return;
+            updating = true;
+            p_cards_authoritative = true;
+            c_num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(c_zeros_card->getValues(), "s")));
+            updating = false;
+            if (onChanged) onChanged();
+            p_cards_authoritative = false;
+        };
+    }
+
+    void syncToModelS(SharedSystemModel* m) {
+        m->comp_enabled_s = enable_chk->isChecked();
+        m->c_num_str = c_num_edit->text().toStdString();
+        m->c_den_str = c_den_edit->text().toStdString();
+        m->c_gain    = std::max(0.0, parseNumericInput(kc_edit->text().toStdString(), 1.0));
+        if (p_cards_authoritative) {
+            m->c_poles = c_poles_card->getValues();
+            m->c_zeros = c_zeros_card->getValues();
+        } else {
+            try {
+                auto pn = parsePolynomialInput(m->c_num_str);
+                auto pd = parsePolynomialInput(m->c_den_str);
+                m->c_zeros = pn.roots;
+                m->c_poles = pd.roots;
+                updating = true;
+                c_poles_card->setValues(m->c_poles);
+                c_zeros_card->setValues(m->c_zeros);
+                updating = false;
+            } catch (...) {
+                m->c_poles = c_poles_card->getValues();
+                m->c_zeros = c_zeros_card->getValues();
+            }
+        }
+    }
+
+    void loadFromModelS(const SharedSystemModel* m) {
+        updating = true;
+        enable_chk->setChecked(m->comp_enabled_s);
+        body_w->setEnabled(m->comp_enabled_s);
+        c_poles_card->setValues(m->c_poles);
+        c_zeros_card->setValues(m->c_zeros);
+        c_num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(m->c_zeros, "s")));
+        c_den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(m->c_poles, "s")));
+        kc_edit->setText(QString::number(m->c_gain, 'g', 4));
         updating = false;
     }
 };
@@ -686,6 +858,25 @@ public:
     }
 };
 
+// =============================================================================
+// Lead / Lag / PD / PI Root Locus Compensator Synthesis Result
+// =============================================================================
+struct RootLocusCompensatorResult {
+    bool valid = false;
+    std::string comp_type = "Lead"; // "Lead", "PD", "Lag", "PI"
+    std::string method_name;
+    Complex s_target{-2.0, 2.0};
+    double angle_def_deg = 0.0;
+    bool has_zero = true;
+    bool has_pole = true;
+    double z_c = 2.0; // Compensator zero at s = -z_c (so z_c > 0 is LHP)
+    double p_c = 5.0; // Compensator pole at s = -p_c (so p_c > 0 is LHP)
+    double k_c = 1.0; // Required loop gain at s_target
+    std::string gc_latex;
+    std::string steps_latex;
+    std::string summary_text;
+};
+
 class DesignParametersDialog : public QDialog {
     Q_OBJECT
 public:
@@ -694,9 +885,11 @@ public:
     std::map<std::string, double>* input_map;
     std::function<void(const ConstraintMatrixAnalysis&)> onApplyDesign;
     std::function<void(double)> onMaxKChanged;
+    std::function<void(const RootLocusCompensatorResult&)> onApplyCompensator;
+    std::function<void()> onRestoreUncompensated;
 
     QStackedWidget* sub_stack;
-    QPushButton *tab_btn_fb, *tab_btn_synth;
+    QPushButton *tab_btn_fb, *tab_btn_synth, *tab_btn_comp;
     QLabel* top_subtitle_lbl;
 
     // Page 1: Feedback H(s) & Resulting T(s) Menu Widgets
@@ -735,6 +928,15 @@ public:
     QFrame* bottom_formula_box;
     MathFormulaWidget* formula_math_w;
     ConstraintMatrixAnalysis last_analysis;
+
+    // Page 3: Root Locus Lead / Lag / PD / PI Compensator Synthesizer Widgets
+    QComboBox *comp_type_combo = nullptr, *comp_method_combo = nullptr;
+    QLineEdit *comp_sd_re_edit = nullptr, *comp_sd_im_edit = nullptr;
+    QLineEdit *comp_param_edit = nullptr;
+    QLabel *comp_param_lbl = nullptr, *comp_def_lbl = nullptr, *comp_verdict_lbl = nullptr;
+    MathFormulaWidget *comp_gc_math_w = nullptr, *comp_steps_math_w = nullptr;
+    RootLocusCompensatorResult last_comp_res;
+
     bool updating = false;
 
     DesignParametersDialog(SharedSystemModel* m,
@@ -742,36 +944,41 @@ public:
                            std::map<std::string, double>* in,
                            std::function<void(const ConstraintMatrixAnalysis&)> apply_cb,
                            std::function<void(double)> maxk_cb,
-                           QWidget* parent = nullptr)
+                           QWidget* parent = nullptr,
+                           std::function<void(const RootLocusCompensatorResult&)> comp_cb = nullptr,
+                           std::function<void()> restore_cb = nullptr)
         : QDialog(parent), model(m), lock_map(lk), input_map(in),
-          onApplyDesign(std::move(apply_cb)), onMaxKChanged(std::move(maxk_cb))
+          onApplyDesign(std::move(apply_cb)), onMaxKChanged(std::move(maxk_cb)),
+          onApplyCompensator(std::move(comp_cb)), onRestoreUncompensated(std::move(restore_cb))
     {
-        setWindowTitle("Spec Synthesizer & Multi-Formula Equation Cross-Reference Breakout");
-        resize(1120, 790);
+        setWindowTitle("Spec Synthesizer, Feedback H(s) & Root Locus Compensator Designer");
+        resize(1140, 790);
         setStyleSheet(QString("QDialog { background-color: %1; }").arg(Theme::BG_WINDOW));
 
         auto* main_l = new QVBoxLayout(this);
         main_l->setContentsMargins(14, 10, 14, 12);
         main_l->setSpacing(8);
 
-        // Top Header Bar with Sub-Page Switcher
+        // Top Header Bar with 3-Page Switcher
         auto* hdr_card = makeCard();
         auto* hdr_v = new QVBoxLayout(hdr_card);
         hdr_v->setContentsMargins(12, 8, 12, 8);
         hdr_v->setSpacing(4);
 
         auto* hdr_top = new QHBoxLayout();
-        auto* main_title = new QLabel("Parameter Synthesizer & Multi-Formula Cross-Reference Breakout");
+        auto* main_title = new QLabel("Parameter Synthesizer & Root Locus Compensator Designer");
         main_title->setStyleSheet(QString("color: %1; font-size: 15px; font-weight: bold; border:none;").arg(Theme::TEXT_PRIMARY));
 
-        tab_btn_fb    = new QPushButton("1. 🔁 Feedback H(s) & Resulting T(s) Menu");
-        tab_btn_synth = new QPushButton("2. 🎛 Keep (🔒) vs. Change (🔄) Synthesizer");
-        for (auto* b : {tab_btn_fb, tab_btn_synth}) b->setCursor(Qt::PointingHandCursor);
+        tab_btn_fb    = new QPushButton("1. 🔁 Feedback H(s) & T(s)");
+        tab_btn_synth = new QPushButton("2. 🎛 Keep (🔒) vs. Change (🔄)");
+        tab_btn_comp  = new QPushButton("3. 📐 Lead / Lag Compensator (Ghost RL)");
+        for (auto* b : {tab_btn_fb, tab_btn_synth, tab_btn_comp}) b->setCursor(Qt::PointingHandCursor);
 
         hdr_top->addWidget(main_title);
         hdr_top->addStretch();
         hdr_top->addWidget(tab_btn_fb);
         hdr_top->addWidget(tab_btn_synth);
+        hdr_top->addWidget(tab_btn_comp);
         hdr_v->addLayout(hdr_top);
 
         top_subtitle_lbl = new QLabel();
@@ -782,14 +989,17 @@ public:
         sub_stack = new QStackedWidget(this);
         sub_stack->addWidget(buildFeedbackAndTransferFunctionPage()); // Page 0
         sub_stack->addWidget(buildKeepChangeSynthesizerPage());       // Page 1
+        sub_stack->addWidget(buildCompensatorDesignPage());           // Page 2
         main_l->addWidget(sub_stack, 1);
 
         connect(tab_btn_fb,    &QPushButton::clicked, this, [this]() { switchSubPage(0); });
         connect(tab_btn_synth, &QPushButton::clicked, this, [this]() { switchSubPage(1); });
+        connect(tab_btn_comp,  &QPushButton::clicked, this, [this]() { switchSubPage(2); });
 
-        switchSubPage(1);
+        switchSubPage(2); // Open directly on Lead/Lag Compensator or Keep/Change
         refreshFeedbackPage();
         refreshEvaluation();
+        refreshCompensatorEvaluation();
     }
 
 private:
@@ -800,14 +1010,357 @@ private:
                             .arg(Theme::BG_INPUT, Theme::TEXT_SECONDARY, Theme::BORDER_INPUT);
         tab_btn_fb->setStyleSheet(idx == 0 ? active_ss : idle_ss);
         tab_btn_synth->setStyleSheet(idx == 1 ? active_ss : idle_ss);
+        tab_btn_comp->setStyleSheet(idx == 2 ? active_ss : idle_ss);
 
         if (idx == 0) {
             top_subtitle_lbl->setText("Feedback H(s) & Closed-Loop T(s) Menu: Enter Num_H(s) & Den_H(s) just like G(s), check P / PI / PD / PID, and inspect the resulting symbolic & numerical T(s)!");
             refreshFeedbackPage();
-        } else {
+        } else if (idx == 1) {
             top_subtitle_lbl->setText("Keep (🔒) vs. Change (🔄) Synthesizer: Lock fixed design specs, solve changed parameters, and click '▶ Show Calc' on any row to see how it is calculated.");
             refreshEvaluation();
+        } else {
+            top_subtitle_lbl->setText("Root Locus Compensator Designer: Synthesize Lead, PD, Lag, or PI pole-zero compensators for Test Point s_d and overlay the compensated Root Locus against the dashed Ghost uncompensated locus!");
+            refreshCompensatorEvaluation();
         }
+    }
+
+    QWidget* buildCompensatorDesignPage() {
+        auto* page = new QWidget();
+        auto* vl = new QVBoxLayout(page);
+        vl->setContentsMargins(0, 0, 0, 0);
+        vl->setSpacing(8);
+
+        // 1. Top Controls Card
+        auto* ctrl_card = makeCard();
+        auto* cl = new QVBoxLayout(ctrl_card);
+        cl->setContentsMargins(12, 10, 12, 10);
+        cl->setSpacing(8);
+
+        auto* row1 = new QHBoxLayout();
+        auto* t_lbl = new QLabel("Compensator Type:");
+        t_lbl->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_ZERO));
+        comp_type_combo = new QComboBox();
+        comp_type_combo->addItems({
+            "Lead Compensator   Gc(s) = Kc (s + zc) / (s + pc)   [Δθ > 0°]",
+            "Ideal PD Compensator   Gc(s) = Kc (s + zc)   [Single Zero]",
+            "Lag Compensator   Gc(s) = Kc (s + zc) / (s + pc)   [Boost Static Error Constant]",
+            "Ideal PI Compensator   Gc(s) = Kc (s + zc) / s   [Pole at Origin s = 0]"
+        });
+        comp_type_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 4px 8px; font-weight: bold; font-size: 11px;")
+                                       .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
+
+        auto* m_lbl = new QLabel("Placement Method:");
+        m_lbl->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_PID));
+        comp_method_combo = new QComboBox();
+        comp_method_combo->addItems({
+            "Angle Bisector Method (Min Kc / Max α)",
+            "Cancel Slowest Real Plant Pole (zc = -p_plant)",
+            "User-Specified Zero Location zc (s = -zc)"
+        });
+        comp_method_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 4px 8px; font-weight: bold; font-size: 11px;")
+                                         .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
+
+        row1->addWidget(t_lbl);
+        row1->addWidget(comp_type_combo, 1);
+        row1->addSpacing(12);
+        row1->addWidget(m_lbl);
+        row1->addWidget(comp_method_combo, 1);
+        cl->addLayout(row1);
+
+        auto* row2 = new QHBoxLayout();
+        auto* sd_lbl = new QLabel("Target Closed-Loop Pole  s_d = σ ± jωd :");
+        sd_lbl->setStyleSheet("color: #facc15; font-weight: bold; font-size: 11px; border:none;");
+        auto* re_l = new QLabel("Real (σ):");
+        re_l->setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold; border:none;");
+        comp_sd_re_edit = makeDarkEntry(QString::number(model->test_point.real(), 'g', 4), 70);
+        auto* im_l = new QLabel("Imag (jωd):");
+        im_l->setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold; border:none;");
+        comp_sd_im_edit = makeDarkEntry(QString::number(std::abs(model->test_point.imag()) > 1e-4 ? std::abs(model->test_point.imag()) : 2.0, 'g', 4), 70);
+
+        auto* pull_tp_btn = makeActionBtn("📍 Pull Current Test Point s", Theme::TEXT_PRIMARY, Theme::BG_INPUT);
+        auto* pull_spec_btn = makeActionBtn("🎯 Pull from Locked (ζ, ωn)", Theme::ACCENT_ZERO, Theme::BG_INPUT);
+
+        comp_param_lbl = new QLabel("Custom Zero zc (s = -zc):");
+        comp_param_lbl->setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold; border:none;");
+        comp_param_edit = makeDarkEntry("2.0", 65);
+
+        row2->addWidget(sd_lbl);
+        row2->addWidget(re_l);
+        row2->addWidget(comp_sd_re_edit);
+        row2->addWidget(im_l);
+        row2->addWidget(comp_sd_im_edit);
+        row2->addWidget(pull_tp_btn);
+        row2->addWidget(pull_spec_btn);
+        row2->addStretch();
+        row2->addWidget(comp_param_lbl);
+        row2->addWidget(comp_param_edit);
+        cl->addLayout(row2);
+
+        comp_def_lbl = new QLabel();
+        comp_def_lbl->setStyleSheet("color: #fde68a; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;");
+        cl->addWidget(comp_def_lbl);
+        vl->addWidget(ctrl_card);
+
+        // 2. Synthesized Gc(s) & Step-by-Step Trigonometric Derivation Card
+        auto* math_card = makeCard();
+        auto* ml = new QVBoxLayout(math_card);
+        ml->setContentsMargins(12, 10, 12, 10);
+        ml->setSpacing(8);
+
+        auto* gc_hdr = new QLabel("1. SYNTHESIZED COMPENSATOR TRANSFER FUNCTION  Gc(s)  &  REQUIRED LOOP GAIN  Kc");
+        gc_hdr->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_PID));
+        comp_gc_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_PID), QColor(Theme::BG_INPUT), 12);
+
+        auto* st_hdr = new QLabel("2. STEP-BY-STEP GEOMETRIC & TRIGONOMETRIC SYNTHESIS AT  s_d");
+        st_hdr->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_ZERO));
+        comp_steps_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 11);
+
+        comp_verdict_lbl = new QLabel();
+        comp_verdict_lbl->setWordWrap(true);
+        comp_verdict_lbl->setStyleSheet("color: #a7f3d0; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;");
+
+        ml->addWidget(gc_hdr);
+        ml->addWidget(comp_gc_math_w);
+        ml->addWidget(st_hdr);
+        ml->addWidget(comp_steps_math_w, 1);
+        ml->addWidget(comp_verdict_lbl);
+        vl->addWidget(math_card, 1);
+
+        // 3. Bottom Action Bar: Apply with Ghost RL Overlay or Restore Uncompensated Plant
+        auto* act_card = makeCard();
+        auto* al = new QHBoxLayout(act_card);
+        al->setContentsMargins(12, 8, 12, 8);
+
+        auto* ghost_info = new QLabel("👻 Applying snapshots the uncompensated plant as a dashed Ghost Root Locus so you can compare both curves side-by-side.");
+        ghost_info->setStyleSheet("color: #94a3b8; font-size: 11px; border:none;");
+
+        auto* restore_btn = makeActionBtn("↺ Restore Uncompensated Plant", "#f87171", Theme::BG_INPUT);
+        auto* apply_comp_btn = makeActionBtn("✔ Apply Compensator & Pin Ghost RL ➔", "#0b0e14", Theme::ACCENT_PID);
+
+        al->addWidget(ghost_info, 1);
+        al->addWidget(restore_btn);
+        al->addSpacing(8);
+        al->addWidget(apply_comp_btn);
+        vl->addWidget(act_card);
+
+        // Connections
+        connect(comp_type_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
+            if (idx == 0) { // Lead
+                comp_method_combo->setEnabled(true);
+                int m_idx = comp_method_combo->currentIndex();
+                comp_param_lbl->setText("Custom Zero zc (s = -zc):");
+                comp_param_lbl->setVisible(m_idx == 2);
+                comp_param_edit->setVisible(m_idx == 2);
+            } else if (idx == 1) { // Ideal PD
+                comp_method_combo->setEnabled(false);
+                comp_param_lbl->setVisible(false);
+                comp_param_edit->setVisible(false);
+            } else if (idx == 2) { // Lag
+                comp_method_combo->setEnabled(false);
+                comp_param_lbl->setText("Error Boost Ratio β = zc/pc (>1):");
+                comp_param_edit->setText("5.0");
+                comp_param_lbl->setVisible(true);
+                comp_param_edit->setVisible(true);
+            } else { // Ideal PI
+                comp_method_combo->setEnabled(false);
+                comp_param_lbl->setText("PI Zero Location zc (s = -zc):");
+                comp_param_edit->setText("0.2");
+                comp_param_lbl->setVisible(true);
+                comp_param_edit->setVisible(true);
+            }
+            refreshCompensatorEvaluation();
+        });
+
+        connect(comp_method_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int m_idx) {
+            bool show_p = (comp_type_combo->currentIndex() == 0 && m_idx == 2);
+            comp_param_lbl->setVisible(show_p);
+            comp_param_edit->setVisible(show_p);
+            refreshCompensatorEvaluation();
+        });
+
+        for (auto* ed : {comp_sd_re_edit, comp_sd_im_edit, comp_param_edit}) {
+            connect(ed, &QLineEdit::textEdited, this, [this]() { refreshCompensatorEvaluation(); });
+        }
+
+        connect(pull_tp_btn, &QPushButton::clicked, this, [this]() {
+            comp_sd_re_edit->setText(QString::number(model->test_point.real(), 'g', 4));
+            comp_sd_im_edit->setText(QString::number(std::abs(model->test_point.imag()), 'g', 4));
+            refreshCompensatorEvaluation();
+        });
+
+        connect(pull_spec_btn, &QPushButton::clicked, this, [this]() {
+            refreshEvaluation();
+            double sig = last_analysis.solved["sigma_d"];
+            double wd  = last_analysis.solved["omega_d"];
+            comp_sd_re_edit->setText(QString::number(- std::abs(sig), 'g', 4));
+            comp_sd_im_edit->setText(QString::number(std::abs(wd), 'g', 4));
+            refreshCompensatorEvaluation();
+        });
+
+        connect(apply_comp_btn, &QPushButton::clicked, this, [this]() {
+            refreshCompensatorEvaluation();
+            if (last_comp_res.valid && onApplyCompensator) {
+                onApplyCompensator(last_comp_res);
+            }
+        });
+
+        connect(restore_btn, &QPushButton::clicked, this, [this]() {
+            if (onRestoreUncompensated) onRestoreUncompensated();
+            refreshCompensatorEvaluation();
+        });
+
+        comp_param_lbl->setVisible(false);
+        comp_param_edit->setVisible(false);
+        return page;
+    }
+
+    void refreshCompensatorEvaluation() {
+        if (!comp_sd_re_edit) return;
+        double sig = parseNumericInput(comp_sd_re_edit->text().toStdString(), -2.0);
+        double wd  = std::abs(parseNumericInput(comp_sd_im_edit->text().toStdString(), 2.0));
+        Complex sd(sig, wd);
+
+        auto loop_poles = model->uncompensatedLoopPolesS();
+        auto loop_zeros = model->uncompensatedLoopZerosS();
+        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, sd, 1.0);
+        double def_deg = computeAngleDeficiency(ev.angle_deg); // in [-180, 180]
+
+        comp_def_lbl->setText(QString(
+            "Uncompensated Evaluation @ s_d = %1 + j%2 :   ∠G(s_d)H(s_d) = %3°   •   |G(s_d)H(s_d)| = %4   •   Angle Deficiency Δθ = %5°")
+            .arg(QString::fromStdString(PRECISION.fmt(sig)))
+            .arg(QString::fromStdString(PRECISION.fmt(wd)))
+            .arg(QString::fromStdString(PRECISION.fmt(ev.angle_deg)))
+            .arg(QString::fromStdString(PRECISION.fmt(ev.magnitude)))
+            .arg(QString::fromStdString(PRECISION.fmt(def_deg, true))));
+
+        RootLocusCompensatorResult res;
+        res.s_target = sd;
+        res.angle_def_deg = def_deg;
+
+        int type_idx = comp_type_combo->currentIndex();
+        int meth_idx = comp_method_combo->currentIndex();
+        double param_v = std::max(1e-4, std::abs(parseNumericInput(comp_param_edit->text().toStdString(), 2.0)));
+
+        double phi_deg = std::clamp(std::abs(def_deg), 1.0, 85.0);
+        double phi_rad = phi_deg * PI / 180.0;
+
+        if (type_idx == 0) {
+            // LEAD COMPENSATOR
+            res.comp_type = "Lead";
+            res.has_zero = true;
+            res.has_pole = true;
+            if (meth_idx == 0) {
+                // Angle Bisector Method
+                res.method_name = "Angle Bisector Method";
+                // Angle of s_d from positive real axis ispsi in (0, pi)
+                double psi = std::atan2(wd, sig); // rad, typically in (pi/2, pi) for LHP
+                double bisector = 0.5 * (PI + psi);
+                double ang_z = bisector - 0.5 * phi_rad;
+                double ang_p = bisector + 0.5 * phi_rad;
+                // From geometry: -z_c = sig + wd / tan(pi - ang_z) => z_c = -sig + wd * cot(pi - ang_z)
+                res.z_c = std::max(1e-3, -sig - wd / std::tan(ang_z));
+                res.p_c = std::max(res.z_c + 1e-3, -sig - wd / std::tan(ang_p));
+                res.steps_latex =
+                    "\\phi_{\\mathrm{lead}} = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ, \\quad "
+                    "\\psi = \\angle s_d = " + PRECISION.fmt(psi * 180.0 / PI) + "^\\circ \\implies "
+                    "z_c = " + PRECISION.fmt(res.z_c) + ", \\; p_c = " + PRECISION.fmt(res.p_c);
+            } else if (meth_idx == 1) {
+                // Pole-Cancellation Method: pick slowest negative real pole (excluding s=0)
+                res.method_name = "Pole-Cancellation Method";
+                double p_cancel = -sig;
+                for (const auto& p : model->poles) {
+                    if (std::abs(p.imag()) < 1e-5 && p.real() < -1e-4) {
+                        if (std::abs(p.real()) < p_cancel || p_cancel == -sig) p_cancel = -p.real();
+                    }
+                }
+                res.z_c = std::max(1e-3, p_cancel);
+                double theta_z = std::atan2(wd, sig + res.z_c);
+                double theta_p = std::clamp(theta_z - phi_rad, 0.05, PI - 0.05);
+                res.p_c = std::max(1e-3, -sig + wd / std::tan(theta_p));
+                res.steps_latex =
+                    "z_c = p_{\\mathrm{plant}} = " + PRECISION.fmt(res.z_c) + " \\implies "
+                    "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\quad "
+                    "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ \\implies "
+                    "p_c = -\\sigma_d + \\frac{\\omega_d}{\\tan\\theta_p} = " + PRECISION.fmt(res.p_c);
+            } else {
+                // User-Specified Zero z_c
+                res.method_name = "User-Specified Zero z_c";
+                res.z_c = param_v;
+                double theta_z = std::atan2(wd, sig + res.z_c);
+                double theta_p = std::clamp(theta_z - phi_rad, 0.05, PI - 0.05);
+                res.p_c = std::max(1e-3, -sig + wd / std::tan(theta_p));
+                res.steps_latex =
+                    "z_c = " + PRECISION.fmt(res.z_c) + " \\implies "
+                    "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\quad "
+                    "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ \\implies "
+                    "p_c = " + PRECISION.fmt(res.p_c);
+            }
+        } else if (type_idx == 1) {
+            // IDEAL PD COMPENSATOR: Gc(s) = Kc (s + zc)
+            res.comp_type = "PD";
+            res.method_name = "Exact Angle Deficiency Zero Placement";
+            res.has_zero = true;
+            res.has_pole = false;
+            res.z_c = std::max(1e-3, -sig + wd / std::tan(phi_rad));
+            res.p_c = 0.0;
+            res.steps_latex =
+                "\\theta_z = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ \\implies "
+                "z_c = -\\sigma_d + \\frac{\\omega_d}{\\tan(\\Delta\\theta)} = " + PRECISION.fmt(res.z_c);
+        } else if (type_idx == 2) {
+            // LAG COMPENSATOR: Gc(s) = Kc (s + zc) / (s + pc) with zc close to origin
+            res.comp_type = "Lag";
+            res.method_name = "Small-Angle Origin Placement (zc = |σd|/10)";
+            res.has_zero = true;
+            res.has_pole = true;
+            double beta = std::max(1.05, param_v);
+            res.z_c = std::max(0.02, std::abs(sig) * 0.10);
+            res.p_c = res.z_c / beta;
+            double lag_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig + res.p_c)) * 180.0 / PI;
+            res.steps_latex =
+                "\\beta = \\frac{z_c}{p_c} = " + PRECISION.fmt(beta) + ", \\quad "
+                "z_c = 0.1|\\sigma_d| = " + PRECISION.fmt(res.z_c) + " \\implies "
+                "p_c = \\frac{z_c}{\\beta} = " + PRECISION.fmt(res.p_c) + " \\quad "
+                "(\\Delta\\theta_{\\mathrm{lag}} = " + PRECISION.fmt(lag_ang) + "^\\circ)";
+        } else {
+            // IDEAL PI COMPENSATOR: Gc(s) = Kc (s + zc) / s
+            res.comp_type = "PI";
+            res.method_name = "Integrator at s = 0 + Nearby Zero s = -zc";
+            res.has_zero = true;
+            res.has_pole = true;
+            res.z_c = std::max(0.01, param_v);
+            res.p_c = 0.0;
+            double pi_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig)) * 180.0 / PI;
+            res.steps_latex =
+                "p_c = 0, \\quad z_c = " + PRECISION.fmt(res.z_c) + " \\quad "
+                "(\\Delta\\theta_{\\mathrm{PI}} = " + PRECISION.fmt(pi_ang) + "^\\circ \\text{ at } s_d)";
+        }
+
+        // Compute compensated magnitude & required loop gain Kc at s_d
+        std::vector<Complex> comp_poles = loop_poles;
+        std::vector<Complex> comp_zeros = loop_zeros;
+        if (res.has_zero) comp_zeros.push_back(Complex(-res.z_c, 0.0));
+        if (res.has_pole) comp_poles.push_back(Complex(-res.p_c, 0.0));
+
+        auto ev_comp = evaluateTransferFunction(comp_poles, comp_zeros, sd, 1.0);
+        res.k_c = std::isfinite(ev_comp.rl_gain_k) ? ev_comp.rl_gain_k : 1.0;
+        res.valid = true;
+
+        if (res.comp_type == "PD") {
+            res.gc_latex = "G_c(s) = K_c (s + " + PRECISION.fmt(res.z_c) + "), \\quad K_c = " + PRECISION.fmt(res.k_c);
+        } else if (res.comp_type == "PI") {
+            res.gc_latex = "G_c(s) = K_c \\frac{s + " + PRECISION.fmt(res.z_c) + "}{s}, \\quad K_c = " + PRECISION.fmt(res.k_c);
+        } else {
+            res.gc_latex = "G_c(s) = K_c \\frac{s + " + PRECISION.fmt(res.z_c) + "}{s + " + PRECISION.fmt(res.p_c) + "}, \\quad K_c = " + PRECISION.fmt(res.k_c);
+        }
+
+        double new_def = computeAngleDeficiency(ev_comp.angle_deg);
+        res.summary_text = "✔ Compensated Loop @ s_d:  ∠Gc(s_d)G(s_d)H(s_d) = " + PRECISION.fmt(ev_comp.angle_deg) +
+                           "°  (|Δθ| = " + PRECISION.fmt(std::abs(new_def)) + "°)  •  Required Gain Kc = " + PRECISION.fmt(res.k_c);
+
+        comp_gc_math_w->setLatex(QString::fromStdString(res.gc_latex));
+        comp_steps_math_w->setLatex(QString::fromStdString(res.steps_latex));
+        comp_verdict_lbl->setText(QString::fromStdString(res.summary_text));
+        last_comp_res = res;
     }
 
     QWidget* buildFeedbackAndTransferFunctionPage() {

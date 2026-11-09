@@ -6,6 +6,12 @@ class ComplexPlaneCanvas : public QWidget {
 public:
     bool is_z_plane = false;
     bool show_locus = true;
+    bool show_ghost_locus = false;
+    std::vector<Complex> ghost_poles;
+    std::vector<Complex> ghost_zeros;
+    std::vector<Complex> cached_ghost_poles;
+    std::vector<Complex> cached_ghost_zeros;
+    std::vector<std::vector<Complex>> cached_ghost_branches;
     bool show_asymp = true;
     bool show_unit_circle = false;
     bool show_zgrid = false;
@@ -14,6 +20,8 @@ public:
     std::vector<Complex> zeros;
     std::vector<Complex> cached_poles;
     std::vector<Complex> cached_zeros;
+    std::vector<Complex> comp_poles;
+    std::vector<Complex> comp_zeros;
     std::vector<std::vector<Complex>> cached_branches;
     Complex test_point = {-2.0, 2.0};
     bool is_on_rl = true;
@@ -85,6 +93,12 @@ protected:
     void computeAutoBounds() {
         std::vector<Complex> pts = poles;
         pts.insert(pts.end(), zeros.begin(), zeros.end());
+
+        if (show_ghost_locus) {
+            pts.insert(pts.end(), ghost_poles.begin(), ghost_poles.end());
+            pts.insert(pts.end(), ghost_zeros.begin(), ghost_zeros.end());
+        }
+
         pts.push_back(test_point);
         if (is_z_plane) {
             pts.push_back({1.0, 0.0}); pts.push_back({-1.0, 0.0});
@@ -261,6 +275,51 @@ protected:
             }
         }
 
+        // Uncompensated "Ghost" Root Locus Overlay (Dashed Reference Curve + Faint Poles/Zeros)
+        if (show_ghost_locus && !ghost_poles.empty()) {
+            if (ghost_poles != cached_ghost_poles || ghost_zeros != cached_ghost_zeros) {
+                cached_ghost_poles = ghost_poles;
+                cached_ghost_zeros = ghost_zeros;
+                cached_ghost_branches = computeRootLocusBranches(ghost_poles, ghost_zeros);
+            }
+            double max_jump = std::max(width(), height()) * 0.45;
+            QColor ghost_col(148, 163, 184, 120); // Muted Slate-Silver dashed curve
+            p.setPen(QPen(ghost_col, 1.8, Qt::DashLine));
+            p.setBrush(Qt::NoBrush);
+
+            for (const auto& br : cached_ghost_branches) {
+                QPainterPath gpath;
+                bool started = false;
+                QPointF prev_px;
+                for (const auto& pt : br) {
+                    QPointF cur_px = toPx(pt);
+                    if (!started) {
+                        gpath.moveTo(cur_px);
+                        started = true;
+                    } else {
+                        if (std::hypot(cur_px.x() - prev_px.x(), cur_px.y() - prev_px.y()) > max_jump)
+                            gpath.moveTo(cur_px);
+                        else
+                            gpath.lineTo(cur_px);
+                    }
+                    prev_px = cur_px;
+                }
+                p.drawPath(gpath);
+            }
+
+            // Faint Ghost Open-Loop Poles (×) and Zeros (○)
+            p.setPen(QPen(QColor(255, 95, 86, 110), 1.6));
+            for (const auto& gp : ghost_poles) {
+                QPointF gpx = toPx(gp);
+                p.drawLine(gpx + QPointF(-4.5, -4.5), gpx + QPointF(4.5, 4.5));
+                p.drawLine(gpx + QPointF(-4.5,  4.5), gpx + QPointF(4.5, -4.5));
+            }
+            p.setPen(QPen(QColor(56, 189, 248, 110), 1.6));
+            for (const auto& gz : ghost_zeros) {
+                p.drawEllipse(toPx(gz), 4.5, 4.5);
+            }
+        }
+
         // Root Locus Branches + Directional Arrows (➤)
         if (show_locus) {
             if (poles != cached_poles || zeros != cached_zeros) {
@@ -317,7 +376,12 @@ protected:
         // =====================================================================
         current_intersections.clear();
         if (!is_z_plane) {
-            auto branches = computeRootLocusBranches(poles, zeros, 260);
+            if (poles != cached_poles || zeros != cached_zeros) {
+                cached_poles = poles;
+                cached_zeros = zeros;
+                cached_branches = computeRootLocusBranches(poles, zeros);
+            }
+            const auto& branches = cached_branches;
 
             auto addCrossing = [&](Complex p1, Complex p2, double t_frac, const QString& tag, const QColor& col) {
                 Complex x_pt = p1 + t_frac * (p2 - p1);
@@ -680,6 +744,22 @@ protected:
             QPointF px = toPx(pl);
             p.drawLine(px + QPointF(-6, -6), px + QPointF(6, 6));
             p.drawLine(px + QPointF(-6, 6), px + QPointF(6, -6));
+        }
+
+        // Compensator Gc(s) Zeros (○) & Poles (×) Highlighted in Emerald Green (#34d399)
+        if (!comp_zeros.empty() || !comp_poles.empty()) {
+            QColor comp_col("#34d399");
+            p.setPen(QPen(comp_col, 2.5));
+            p.setBrush(QColor(Theme::BG_PLOT));
+            for (const auto& cz : comp_zeros) {
+                QPointF zpx = toPx(cz);
+                p.drawEllipse(zpx, 6.8, 6.8);
+            }
+            for (const auto& cp : comp_poles) {
+                QPointF ppx = toPx(cp);
+                p.drawLine(ppx + QPointF(-6.5, -6.5), ppx + QPointF(6.5, 6.5));
+                p.drawLine(ppx + QPointF(-6.5,  6.5), ppx + QPointF(6.5, -6.5));
+            }
         }
 
         // =====================================================================

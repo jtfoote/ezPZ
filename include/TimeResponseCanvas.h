@@ -1,9 +1,9 @@
 #pragma once
 #include "ComplexPlaneCanvas.h"
-
+#include <QToolTip>
 
 // =============================================================================
-// Time Response Canvas (Fixed Stem Polygon Fill Bug + Pole-Zero Inset)
+// Time Response Canvas (Fixed Stem Polygon Fill Bug + Resizable Pole-Zero Inset)
 // =============================================================================
 class TimeResponseCanvas : public QWidget {
     Q_OBJECT
@@ -27,10 +27,12 @@ public:
     {
         setMinimumSize(460, 360);
         setCursor(Qt::CrossCursor);
+        setMouseTracking(true); // Enables hover tooltips & resize-corner cursor feedback
     }
 
     void resetView() {
         user_bounds_set = false;
+        user_inset_size_set = false;
         update();
     }
 
@@ -40,6 +42,41 @@ protected:
     double y_min = -0.2, y_max = 1.5;
     bool panning = false;
     QPoint pan_start_px;
+
+    // Resizable Pole-Zero Inset State & Hover Hit-Targets
+    bool user_inset_size_set = false;
+    double custom_inset_w = 190.0;
+    double custom_inset_h = 155.0;
+    bool resizing_inset = false;
+    QPoint resize_start_px;
+    double start_inset_w = 190.0, start_inset_h = 155.0;
+    QRectF last_inset_rect;
+
+    struct InsetMarkerHit {
+        QPointF px;
+        Complex val;
+        QString label;
+    };
+    std::vector<InsetMarkerHit> inset_hits;
+
+    QRectF computeInsetRect(const QRectF& plot_rect) const {
+        double max_w = std::max(140.0, plot_rect.width() * 0.65);
+        double max_h = std::max(120.0, plot_rect.height() * 0.65);
+        double iw = user_inset_size_set
+            ? std::clamp(custom_inset_w, 125.0, max_w)
+            : std::clamp(plot_rect.width() * 0.27, 130.0, 210.0);
+        double ih = user_inset_size_set
+            ? std::clamp(custom_inset_h, 105.0, max_h)
+            : std::clamp(plot_rect.height() * 0.31, 110.0, 175.0);
+        return QRectF(plot_rect.right() - iw - 12.0, plot_rect.top() + 12.0, iw, ih);
+    }
+
+    bool isOnInsetResizeCorner(QPointF pos) const {
+        if (!show_inset || last_inset_rect.isEmpty()) return false;
+        // Bottom-left corner grip of the top-right inset box (within 12 px)
+        return std::abs(pos.x() - last_inset_rect.left()) <= 12.0 &&
+               std::abs(pos.y() - last_inset_rect.bottom()) <= 12.0;
+    }
 
     void computeAutoBounds() {
         if (!is_discrete && sim_res.has_value()) {
@@ -72,9 +109,9 @@ protected:
     }
 
     void drawPoleZeroInset(QPainter& p, const QRectF& plot_rect) {
-        double iw = std::clamp(plot_rect.width() * 0.27, 130.0, 210.0);
-        double ih = std::clamp(plot_rect.height() * 0.31, 110.0, 175.0);
-        QRectF ir(plot_rect.right() - iw - 12.0, plot_rect.top() + 12.0, iw, ih);
+        inset_hits.clear();
+        QRectF ir = computeInsetRect(plot_rect);
+        last_inset_rect = ir;
 
         p.save();
         p.setClipping(false);
@@ -87,23 +124,35 @@ protected:
 
         p.setPen(QColor(Theme::TEXT_SECONDARY));
         p.setFont(QFont("Sans", 8, QFont::Bold));
-        QString title = is_discrete ? "z-Plane & |z|=1" : "Closed-Loop s-Plane";
-        p.drawText(QRectF(ir.left(), ir.top() + 3, ir.width(), 14), Qt::AlignCenter, title);
+        QString title = is_discrete ? "z-Plane (× Pole, ○ Zero)" : "Closed-Loop s-Plane (× Pole, ○ Zero)";
+        p.drawText(QRectF(ir.left() + 6, ir.top() + 3, ir.width() - 12, 14), Qt::AlignCenter, title);
+
+        // Draw bottom-left diagonal resize grip indicator (⤡)
+        p.setPen(QPen(QColor(Theme::TEXT_SECONDARY), 1.2));
+        double gx = ir.left() + 3.0, gy = ir.bottom() - 3.0;
+        p.drawLine(QPointF(gx, gy - 8), QPointF(gx + 8, gy));
+        p.drawLine(QPointF(gx, gy - 4), QPointF(gx + 4, gy));
 
         QRectF inner = ir.adjusted(8, 18, -8, -8);
         p.setClipRect(inner);
 
-        std::vector<Complex> ol_p, ol_z, cl_p;
+        std::vector<Complex> ol_p, ol_z, cl_p, cl_z;
         if (!is_discrete && sim_res.has_value()) {
             ol_p = sim_res->ol_poles;
             ol_z = sim_res->ol_zeros;
             for (const auto& cp : sim_res->cl_poles) {
-                if (std::abs(cp.real()) < 45.0) cl_p.push_back(cp);
+                if (std::abs(cp.real()) < 65.0) cl_p.push_back(cp);
+            }
+            for (const auto& cz : sim_res->cl_zeros) {
+                if (std::abs(cz.real()) < 65.0) cl_z.push_back(cz);
             }
         } else if (is_discrete && dsim_res.has_value()) {
             ol_p = dsim_res->ol_z_poles;
             ol_z = dsim_res->ol_z_zeros;
-            if (show_cl) cl_p = dsim_res->cl_z_poles;
+            if (show_cl) {
+                cl_p = dsim_res->cl_z_poles;
+                cl_z = dsim_res->ol_z_zeros;
+            }
         }
 
         double r0 = -1.35, r1 = 1.35, i0 = -1.35, i1 = 1.35;
@@ -111,6 +160,7 @@ protected:
             std::vector<Complex> pts = ol_p;
             pts.insert(pts.end(), ol_z.begin(), ol_z.end());
             pts.insert(pts.end(), cl_p.begin(), cl_p.end());
+            pts.insert(pts.end(), cl_z.begin(), cl_z.end());
             pts.push_back({0.0, 0.0});
             r0 = 0.0; r1 = 0.0; i0 = 0.0; i1 = 0.0;
             for (const auto& pt : pts) {
@@ -152,25 +202,40 @@ protected:
             p.drawEllipse(QRectF(tl, br));
         }
 
-        // Open-Loop Zeros (o)
+        // 1. Open-Loop Zeros (cyan o)
         p.setPen(QPen(QColor(Theme::ACCENT_ZERO), 1.4));
-        p.setBrush(QColor("#0d111a"));
-        for (const auto& z : ol_z) p.drawEllipse(toInsetPx(z), 4.0, 4.0);
+        p.setBrush(QColor(Theme::BG_PLOT));
+        for (const auto& z : ol_z) {
+            QPointF px = toInsetPx(z);
+            p.drawEllipse(px, 4.0, 4.0);
+            inset_hits.push_back({px, z, is_discrete ? "Open-Loop z-Zero" : "Open-Loop Zero"});
+        }
 
-        // Open-Loop Poles (x)
+        // 2. Open-Loop Poles (coral x)
         p.setPen(QPen(QColor(Theme::ACCENT_POLE), 1.4));
         for (const auto& pl : ol_p) {
             QPointF px = toInsetPx(pl);
             p.drawLine(px + QPointF(-3.8, -3.8), px + QPointF(3.8, 3.8));
-            p.drawLine(px + QPointF(-3.8, 3.8),  px + QPointF(3.8, -3.8));
+            p.drawLine(px + QPointF(-3.8,  3.8), px + QPointF(3.8, -3.8));
+            inset_hits.push_back({px, pl, is_discrete ? "Open-Loop z-Pole" : "Open-Loop Pole"});
         }
 
-        // Closed-Loop Poles (purple x)
-        p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 1.8));
+        // 3. Closed-Loop Zeros (emerald green o)
+        p.setPen(QPen(QColor(Theme::ACCENT_PID), 1.8));
+        p.setBrush(QColor(Theme::BG_PLOT));
+        for (const auto& cz : cl_z) {
+            QPointF px = toInsetPx(cz);
+            p.drawEllipse(px, 4.6, 4.6);
+            inset_hits.push_back({px, cz, is_discrete ? "Closed-Loop z-Zero" : "Closed-Loop Zero"});
+        }
+
+        // 4. Closed-Loop Poles (purple x)
+        p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.0));
         for (const auto& pl : cl_p) {
             QPointF px = toInsetPx(pl);
-            p.drawLine(px + QPointF(-4.5, -4.5), px + QPointF(4.5, 4.5));
-            p.drawLine(px + QPointF(-4.5, 4.5),  px + QPointF(4.5, -4.5));
+            p.drawLine(px + QPointF(-4.6, -4.6), px + QPointF(4.6, 4.6));
+            p.drawLine(px + QPointF(-4.6,  4.6), px + QPointF(4.6, -4.6));
+            inset_hits.push_back({px, pl, is_discrete ? "Closed-Loop z-Pole" : "Closed-Loop Pole"});
         }
 
         p.restore();
@@ -348,14 +413,27 @@ protected:
         }
         p.restore();
 
-        // Draw Pole-Zero Inset in Top-Right Corner
+        // Draw Resizable Pole-Zero Inset in Top-Right Corner
         if (show_inset) {
             drawPoleZeroInset(p, plot_rect);
+        } else {
+            last_inset_rect = QRectF();
+            inset_hits.clear();
         }
     }
 
     void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() == Qt::LeftButton && isOnInsetResizeCorner(e->position())) {
+            resizing_inset = true;
+            user_inset_size_set = true;
+            resize_start_px = e->pos();
+            start_inset_w = last_inset_rect.width();
+            start_inset_h = last_inset_rect.height();
+            setCursor(Qt::SizeBDiagCursor);
+            return;
+        }
         if (e->button() == Qt::LeftButton) {
+            if (show_inset && last_inset_rect.contains(e->position())) return;
             updateCursorFromPx(e->pos().x());
         } else if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
             if (!user_bounds_set) computeAutoBounds();
@@ -367,7 +445,57 @@ protected:
     }
 
     void mouseMoveEvent(QMouseEvent* e) override {
+        if (resizing_inset) {
+            double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
+            double ew = std::max(10.0, width() - pad_l - pad_r);
+            double eh = std::max(10.0, height() - pad_t - pad_b);
+            double dw = double(resize_start_px.x() - e->pos().x());
+            double dh = double(e->pos().y() - resize_start_px.y());
+            custom_inset_w = std::clamp(start_inset_w + dw, 125.0, std::max(140.0, ew * 0.65));
+            custom_inset_h = std::clamp(start_inset_h + dh, 105.0, std::max(120.0, eh * 0.65));
+            update();
+            return;
+        }
+
+        // Hover Tooltip & Resize-Corner Cursor when no mouse button is held
+        if (e->buttons() == Qt::NoButton) {
+            if (isOnInsetResizeCorner(e->position())) {
+                setCursor(Qt::SizeBDiagCursor);
+                QToolTip::showText(e->globalPosition().toPoint(),
+                                   "Drag bottom-left corner to resize Pole-Zero Inset", this);
+                return;
+            }
+            if (show_inset && last_inset_rect.contains(e->position())) {
+                setCursor(Qt::ArrowCursor);
+                // Check hits in reverse order so Closed-Loop poles/zeros take priority
+                for (int i = static_cast<int>(inset_hits.size()) - 1; i >= 0; --i) {
+                    const auto& h = inset_hits[i];
+                    if (std::hypot(e->position().x() - h.px.x(), e->position().y() - h.px.y()) <= 8.5) {
+                        double mag = std::abs(h.val);
+                        double z_val = (mag > 1e-9) ? (-h.val.real() / mag) : 0.0;
+                        QString tip = is_discrete
+                            ? QString("%1\nz = %2\n|z| = %3")
+                                  .arg(h.label)
+                                  .arg(QString::fromStdString(PRECISION.fmtComplex(h.val)))
+                                  .arg(QString::fromStdString(PRECISION.fmt(mag)))
+                            : QString("%1\ns = %2\nωn = %3 rad/s  •  ζ = %4")
+                                  .arg(h.label)
+                                  .arg(QString::fromStdString(PRECISION.fmtComplex(h.val)))
+                                  .arg(QString::fromStdString(PRECISION.fmt(mag)))
+                                  .arg(QString::fromStdString(PRECISION.fmt(z_val)));
+                        QToolTip::showText(e->globalPosition().toPoint(), tip, this);
+                        return;
+                    }
+                }
+                QToolTip::hideText();
+                return;
+            }
+            setCursor(Qt::CrossCursor);
+            QToolTip::hideText();
+        }
+
         if (e->buttons() & Qt::LeftButton) {
+            if (show_inset && last_inset_rect.contains(e->position())) return;
             updateCursorFromPx(e->pos().x());
         } else if (panning) {
             double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
@@ -383,6 +511,7 @@ protected:
     }
 
     void mouseReleaseEvent(QMouseEvent*) override {
+        resizing_inset = false;
         panning = false;
         setCursor(Qt::CrossCursor);
     }
@@ -425,4 +554,3 @@ private:
         }
     }
 };
-

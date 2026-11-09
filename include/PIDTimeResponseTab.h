@@ -284,6 +284,7 @@ public:
                 updating_ui = true;
                 ed->setText(QString::number(v / 100.0, 'g', 4));
                 updating_ui = false;
+                model->comp_enabled_s = false; // Disable compensator when manually adjusting PID gains
                 runSimulation(true);
             });
             connect(ed, &QLineEdit::editingFinished, this, [this, sl, ed]() {
@@ -292,6 +293,7 @@ public:
                 updating_ui = true;
                 sl->setValue(static_cast<int>(std::round(val * 100.0)));
                 updating_ui = false;
+                model->comp_enabled_s = false; // Disable compensator when manually adjusting PID gains
                 runSimulation(true);
             });
         };
@@ -498,6 +500,11 @@ public:
         int mode_idx = loop_mode_combo->currentIndex();
         cfg.closed_loop = (mode_idx != 2);
         cfg.pid_enabled = enable_pid_chk->isChecked() && (mode_idx == 0);
+        cfg.comp_enabled = model->comp_enabled_s;
+        cfg.use_exact_comp_tf = model->comp_enabled_s && model->isFinitePoleCompensatorS();
+        cfg.c_poles = model->c_poles;
+        cfg.c_zeros = model->c_zeros;
+        cfg.c_gain  = model->c_gain;
 
         cfg.kp = parseNumericInput(kp_edit->text().toStdString(), 1.5);
         cfg.ki = parseNumericInput(ki_edit->text().toStdString(), 0.0);

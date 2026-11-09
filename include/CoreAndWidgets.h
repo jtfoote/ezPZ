@@ -1828,6 +1828,11 @@ struct SimulationConfig {
     std::vector<Complex> h_poles;
     std::vector<Complex> h_zeros;
     double h_gain = 1.0;
+    bool comp_enabled = false;
+    bool use_exact_comp_tf = false;
+    std::vector<Complex> c_poles;
+    std::vector<Complex> c_zeros;
+    double c_gain = 1.0;
     double input_magnitude = 1.0;
     bool pid_enabled = true;
     double kp = 1.5;
@@ -1989,7 +1994,21 @@ public:
         }
 
         auto [num_g, den_g] = buildPlantPolynomials(cfg.poles, cfg.zeros, cfg.plant_gain);
-        auto [num_c, den_c] = buildPidPolynomials(cfg.kp, cfg.ki, cfg.kd, cfg.deriv_filter_n, cfg.pid_enabled);
+        
+        Poly num_c = {Complex(1.0, 0.0)};
+        Poly den_c = {Complex(1.0, 0.0)};
+        if (cfg.closed_loop && cfg.pid_enabled) {
+            if (cfg.use_exact_comp_tf) {
+                // Exact Lead / Lag / Pole-Zero Compensator Gc(s) = Kc * Num_c(s) / Den_c(s)
+                std::tie(num_c, den_c) = buildPlantPolynomials(cfg.c_poles, cfg.c_zeros, cfg.c_gain);
+            } else if (std::abs(cfg.ki) > 1e-9) {
+                num_c = {Complex(cfg.kd, 0.0), Complex(cfg.kp, 0.0), Complex(cfg.ki, 0.0)};
+                den_c = {Complex(1.0, 0.0), Complex(0.0, 0.0)};
+            } else {
+                num_c = {Complex(cfg.kd, 0.0), Complex(cfg.kp, 0.0)};
+                den_c = {Complex(1.0, 0.0)};
+            }
+        }
 
         Poly num_h = {Complex(1.0, 0.0)};
         Poly den_h = {Complex(1.0, 0.0)};
@@ -2446,6 +2465,80 @@ public:
     int theme_index = 0;
     bool light_mode = false;
 
+    bool comp_enabled_s = false;
+    std::string c_num_str = "1"; std::string c_den_str = "1";
+    std::vector<Complex> c_poles, c_zeros;
+    double c_gain = 1.0;
+
+    // Checks if Gc(s) is a finite-pole Lead/Lag (cannot be represented by pure Kp + Ki/s + Kd*s alone)
+    bool isFinitePoleCompensatorS() const {
+        if (!comp_enabled_s) return false;
+        if (c_poles.size() == 1 && std::abs(c_poles[0]) < 1e-6 && c_zeros.size() <= 2) return false; // Ideal PI or PID
+        if (c_poles.empty() && c_zeros.size() <= 1) return false; // Pure P or Ideal PD
+        return !c_poles.empty() || c_zeros.size() > 1;
+    }
+
+    // Converts Root Locus Gc(s) = Kc * Num_c(s) / Den_c(s) into Time-Domain (Kp, Ki, Kd)
+    void syncCompensatorToPidGains() {
+        if (!comp_enabled_s) return;
+        pid_enabled = true;
+
+        // Case 1: Pure Proportional Gc(s) = Kc
+        if (c_zeros.empty() && c_poles.empty()) {
+            kp = c_gain;
+            ki = 0.0;
+            kd = 0.0;
+            return;
+        }
+        // Case 2: Ideal PD Gc(s) = Kc * (s - z0) = Kc*s + Kc*(-z0)
+        if (c_zeros.size() == 1 && c_poles.empty()) {
+            double zc = -c_zeros[0].real();
+            kd = c_gain;
+            kp = c_gain * zc;
+            ki = 0.0;
+            return;
+        }
+        // Case 3: Ideal PI Gc(s) = Kc * (s - z0) / s = Kc + (Kc * (-z0)) / s
+        if (c_zeros.size() == 1 && c_poles.size() == 1 && std::abs(c_poles[0]) < 1e-6) {
+            double zc = -c_zeros[0].real();
+            kp = c_gain;
+            ki = c_gain * zc;
+            kd = 0.0;
+            return;
+        }
+        // Case 4: Ideal PID Gc(s) = Kc * (s - z1)(s - z2) / s
+        if (c_zeros.size() == 2 && c_poles.size() == 1 && std::abs(c_poles[0]) < 1e-6) {
+            Poly num_p = polyFromRoots(c_zeros); // s^2 + b1*s + b0
+            kd = c_gain;
+            kp = c_gain * num_p[1].real();
+            ki = c_gain * num_p[2].real();
+            return;
+        }
+        // Case 5: Lead / Lag / General Pole-Zero Gc(s) = Kc * (s + zc) / (s + pc)
+        // Set Kp to the DC gain Gc(0) (or high-freq Kc if pole at 0) for display,
+        // while the time-domain simulator uses the exact Gc(s) poles & zeros!
+        Poly num_p = polyFromRoots(c_zeros);
+        Poly den_p = polyFromRoots(c_poles);
+        double n0 = num_p.back().real();
+        double d0 = den_p.back().real();
+        kp = (std::abs(d0) > 1e-7) ? (c_gain * n0 / d0) : c_gain;
+        ki = 0.0;
+        kd = 0.0;
+    }
+
+    // Uncompensated open-loop poles/zeros: G(s)H(s) only (ignores Gc(s))
+    std::vector<Complex> uncompensatedLoopPolesS() const {
+        auto out = poles;
+        if (!unity_feedback_s) out.insert(out.end(), h_poles.begin(), h_poles.end());
+        return out;
+    }
+
+    std::vector<Complex> uncompensatedLoopZerosS() const {
+        auto out = zeros;
+        if (!unity_feedback_s) out.insert(out.end(), h_zeros.begin(), h_zeros.end());
+        return out;
+    }
+
     SharedSystemModel() {
         std::tie(z_poles, z_zeros, filter_gain) = DiscreteFilterSimulator::designFilterPreset("butter_lp", 0.25, 0.05);
         if (!z_poles.empty()) z_test_point = z_poles[0];
@@ -2637,13 +2730,13 @@ public:
     double hz_fb_gain = 1.0;
 
     std::vector<Complex> effectiveLoopPolesS() const {
-        auto out = poles;
-        if (!unity_feedback_s) out.insert(out.end(), h_poles.begin(), h_poles.end());
+        auto out = uncompensatedLoopPolesS();
+        if (comp_enabled_s) out.insert(out.end(), c_poles.begin(), c_poles.end());
         return out;
     }
     std::vector<Complex> effectiveLoopZerosS() const {
-        auto out = zeros;
-        if (!unity_feedback_s) out.insert(out.end(), h_zeros.begin(), h_zeros.end());
+        auto out = uncompensatedLoopZerosS();
+        if (comp_enabled_s) out.insert(out.end(), c_zeros.begin(), c_zeros.end());
         return out;
     }
     std::vector<Complex> effectiveLoopPolesZ() const {

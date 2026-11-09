@@ -14,6 +14,10 @@ public:
     PoleZeroEditorCard *poles_card, *zeros_card;
     QRadioButton *cart_radio, *polar_radio;
     QCheckBox* chk_tp_show = nullptr;
+    QCheckBox* chk_ghost_rl = nullptr;
+    std::vector<Complex> saved_uncomp_poles;
+    std::vector<Complex> saved_uncomp_zeros;
+    double saved_uncomp_gain = 1.0;
     bool is_polar_mode = false;
 
     QFrame* rl_banner;
@@ -45,6 +49,8 @@ public:
     QComboBox *locus_param_combo = nullptr, *vary_pole_combo = nullptr;
     QLineEdit *edit_fixed_k0 = nullptr;
     QLabel *lbl_vary_pole = nullptr, *lbl_fixed_k0 = nullptr, *gain_title_lbl = nullptr;
+
+    CompensatorConfigCard* comp_card = nullptr;
 
     RootLocusTab(SharedSystemModel* m, std::function<void(double)> send_cb, QWidget* parent = nullptr)
         : QWidget(parent), model(m), onSendGainToPid(std::move(send_cb))
@@ -109,6 +115,21 @@ public:
         tf_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
         poly_l->addWidget(tf_math_w);
         left_v->addWidget(poly_card);
+
+        // 2. Controller / Compensator Gc(s) Block (Poles, Zeros, Gain Kc & Enable Toggle)
+        comp_card = new CompensatorConfigCard();
+        left_v->addWidget(comp_card);
+        comp_card->onChanged = [this]() {
+            if (updating_ui) return;
+            comp_card->syncToModelS(model);
+            model->syncCompensatorToPidGains(); // <-- Converts Gc(s) into Kp, Ki, Kd for Time Domain!
+            if (model->comp_enabled_s && chk_ghost_rl && !chk_ghost_rl->isChecked()) {
+                updating_ui = true;
+                chk_ghost_rl->setChecked(true);
+                updating_ui = false;
+            }
+            evaluateCurrent(true);
+        };
 
 
         // 3. Test Point s & Cartesian / Polar Switcher Card
@@ -298,7 +319,10 @@ public:
         auto* chk_dep = new QCheckBox("Dep/Arr ∠");    chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
         chk_tp_show   = new QCheckBox("Test Point");   chk_tp_show->setChecked(true); chk_tp_show->setStyleSheet("color: #facc15; font-weight: bold;");
         auto* fit_btn = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        chk_ghost_rl  = new QCheckBox("Ghost RL");  chk_ghost_rl->setChecked(false); chk_ghost_rl->setStyleSheet("color: #94a3b8; font-weight: bold;");
+        chk_ghost_rl->setToolTip("Pin current Root Locus as a dashed uncompensated reference curve, or compare before/after compensation.");
         plot_hdr->addWidget(plot_title); plot_hdr->addStretch();
+        plot_hdr->addWidget(chk_ghost_rl);
         plot_hdr->addWidget(chk_rl); plot_hdr->addWidget(chk_as);
         plot_hdr->addWidget(chk_brk); plot_hdr->addWidget(chk_jw);
         plot_hdr->addWidget(chk_dep); plot_hdr->addWidget(chk_tp_show);
@@ -354,6 +378,14 @@ public:
             res_card->setEnabled(v);
             canvas->update();
         });
+        connect(chk_ghost_rl, &QCheckBox::toggled, this, [this](bool v) {
+            canvas->show_ghost_locus = v;
+            if (v) {
+                canvas->ghost_poles = model->uncompensatedLoopPolesS();
+                canvas->ghost_zeros = model->uncompensatedLoopZerosS();
+            }
+            canvas->update();
+        });
         connect(send_btn, &QPushButton::clicked, this, [this]() {
             if (!std::isfinite(last_gain) || last_gain < 0.0) return;
 
@@ -380,7 +412,14 @@ public:
                 // Send fixed_k0 to PID Simulator and sync tabs
                 if (onSendGainToPid) onSendGainToPid(fixed_k0);
             } else {
-                if (onSendGainToPid) onSendGainToPid(last_gain);
+                if (model->comp_enabled_s) {
+                    model->c_gain = last_gain;
+                    model->syncCompensatorToPidGains();
+                    if (comp_card) comp_card->loadFromModelS(model);
+                    if (onSendGainToPid) onSendGainToPid(model->kp);
+                } else {
+                    if (onSendGainToPid) onSendGainToPid(last_gain);
+                }
             }
         });
 
@@ -507,7 +546,48 @@ public:
                 [this](double new_max_k) {
                     edit_max_k->setText(QString::number(new_max_k, 'g', 5));
                 },
-                this
+                this,
+                // 1. On Apply Lead/Lag/PD/PI Compensator -> Populate Gc(s) Controller Card (G(s) stays untouched!)
+                [this](const RootLocusCompensatorResult& comp) {
+                    model->comp_enabled_s = true;
+                    model->c_zeros.clear();
+                    model->c_poles.clear();
+                    if (comp.has_zero) model->c_zeros.push_back(Complex(-comp.z_c, 0.0));
+                    if (comp.has_pole) model->c_poles.push_back(Complex(-comp.p_c, 0.0));
+                    model->c_gain = comp.k_c;
+                    model->c_num_str = formatPolynomialFromRoots(model->c_zeros, "s");
+                    model->c_den_str = formatPolynomialFromRoots(model->c_poles, "s");
+                    model->syncCompensatorToPidGains(); // <-- Syncs Kp, Ki, Kd to Time Domain tab!
+                    model->test_point = comp.s_target;
+
+                    updating_ui = true;
+                    if (comp_card) comp_card->loadFromModelS(model);
+                    if (chk_ghost_rl) chk_ghost_rl->setChecked(true);
+                    if (!is_polar_mode) {
+                        tp_v1_edit->setText(QString::number(comp.s_target.real(), 'g', 4));
+                        tp_v2_edit->setText(QString::number(comp.s_target.imag(), 'g', 4));
+                    } else {
+                        tp_v1_edit->setText(QString::number(std::abs(comp.s_target), 'g', 4));
+                        tp_v2_edit->setText(QString::number(std::arg(comp.s_target) * 180.0 / PI, 'g', 4));
+                    }
+                    edit_live_k->setText(QString::fromStdString(PRECISION.fmt(comp.k_c)));
+                    chk_live_k->setChecked(true);
+                    rl_design_formula_w->setVisible(true);
+                    rl_design_formula_w->setLatex(QString::fromStdString(comp.gc_latex + " \\quad | \\quad " + comp.steps_latex));
+                    updating_ui = false;
+
+                    evaluateCurrent(true);
+                },
+                // 2. On Disable / Reset Compensator Gc(s):
+                [this]() {
+                    model->comp_enabled_s = false;
+                    updating_ui = true;
+                    if (comp_card) comp_card->loadFromModelS(model);
+                    if (chk_ghost_rl) chk_ghost_rl->setChecked(false);
+                    rl_design_formula_w->setVisible(false);
+                    updating_ui = false;
+                    evaluateCurrent(true);
+                }
             );
             dlg->setAttribute(Qt::WA_DeleteOnClose);
             dlg->show();
@@ -604,6 +684,7 @@ public:
         }
         tol_edit->setText(QString::number(model->rl_tol_deg, 'g', 3));
         fb_bar->loadFromModelS(model);
+        if (comp_card) comp_card->loadFromModelS(model);
         updating_ui = false;
         refreshVaryPoleCombo();
         evaluateCurrent(false);
@@ -694,6 +775,16 @@ public:
         // Pass combined loop poles and zeros to the s-plane canvas
         canvas->poles = loop_poles;
         canvas->zeros = loop_zeros;
+        // Always keep Ghost RL synced to the uncompensated G(s)H(s)
+        canvas->ghost_poles = model->uncompensatedLoopPolesS();
+        canvas->ghost_zeros = model->uncompensatedLoopZerosS();
+        canvas->show_ghost_locus = chk_ghost_rl && chk_ghost_rl->isChecked();
+
+        // Highlight Gc(s) poles & zeros when Gc(s) is enabled
+        canvas->comp_poles = model->comp_enabled_s ? model->c_poles : std::vector<Complex>{};
+        canvas->comp_zeros = model->comp_enabled_s ? model->c_zeros : std::vector<Complex>{};
+
+
         canvas->test_point = tp;
         canvas->is_on_rl = on_rl;
 
