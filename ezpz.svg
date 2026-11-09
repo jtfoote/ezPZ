@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>ezPZ</title>
+  <desc>Minimal root-locus inspired ezPZ mark in a restrained charcoal, copper, and sage palette.</desc>
+
+  <rect x="16" y="16" width="480" height="480" rx="88"
+        fill="#0b0e14" stroke="#394743" stroke-width="4"/>
+
+  <!-- Reference axes -->
+  <g fill="none" stroke="#46534E" stroke-width="2.5" stroke-linecap="round">
+    <path d="M48 256H464"/>
+    <path d="M256 48V464"/>
+  </g>
+
+  <!-- Root-locus lettering -->
+  <g fill="none" stroke="#de8027" stroke-width="9"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M74 304
+             C76 266 98 252 128 252
+             C148 252 148 218 124 218
+             C98 218 96 284 126 284
+             C148 284 158 222 184 222
+             C204 222 206 254 178 272
+             C198 280 206 322 184 344
+             C164 362 152 332 172 306
+             C188 288 204 286 218 286"/>
+    <path d="M296 304
+             L296 170
+             C296 132 368 132 368 184
+             C368 234 314 234 314 234
+             L416 234
+             L346 310
+             L418 310"/>
+  </g>
+
+  <!-- Direction chevrons: pole to zero -->
+  <g fill="none" stroke="#de8027" stroke-width="9"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M199 276L209 286L199 296"/>
+    <path d="M382 302L392 310L382 318"/>
+    <path d="M158 231L168 235L165 245" transform="rotate(-45 168 241)"/>
+    <path d="M370 224L380 234L370 244"/>
+  </g>
+
+  <!-- Poles -->
+  <g fill="none" stroke="#f87171" stroke-width="8"
+     stroke-linecap="round">
+    <path d="M61 291L87 317M87 291L61 317"/>
+    <path d="M283 291L309 317M309 291L283 317"/>
+  </g>
+
+  <!-- Zeros -->
+  <g fill="#0b0e14" stroke="#38bdf8" stroke-width="8">
+    <circle cx="232" cy="286" r="13"/>
+    <circle cx="432" cy="310" r="13"/>
+  </g>
+</svg>

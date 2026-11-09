@@ -1,4 +1,5 @@
 #include "UnifiedControlSuiteWindow.h"
+#include <QIcon>
 
 int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
@@ -8,6 +9,8 @@ int main(int argc, char* argv[]) {
         }
     }
     QApplication app(argc, argv);
+    app.setApplicationName("ezPZ");
+    app.setWindowIcon(QIcon(":/ezpz.svg"));
     UnifiedControlSuiteWindow win;
     win.show();
     return app.exec();

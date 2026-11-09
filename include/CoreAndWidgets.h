@@ -242,7 +242,7 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     generator.setFileName(path);
     generator.setSize(canvas->size());
     generator.setViewBox(QRect(0, 0, canvas->width(), canvas->height()));
-    generator.setTitle("PZSuite Plot");
+    generator.setTitle("ezPZ Plot");
 
     canvas->render(&generator);
 
@@ -1671,7 +1671,11 @@ inline TFEvalResult evaluateTransferFunction(const std::vector<Complex>& poles, 
     return {net_deg, mag, k_rl, val, false};
 }
 
-inline std::vector<std::vector<Complex>> computeRootLocusBranches(const std::vector<Complex>& poles, const std::vector<Complex>& zeros, int num_steps = 260) {
+inline std::vector<std::vector<Complex>> computeRootLocusBranches(
+    const std::vector<Complex>& poles,
+    const std::vector<Complex>& zeros,
+    int num_steps = 360)
+{
     size_t deg = std::max(poles.size(), zeros.size());
     if (deg == 0) return {};
 
@@ -1682,22 +1686,36 @@ inline std::vector<std::vector<Complex>> computeRootLocusBranches(const std::vec
     for (size_t i = 0; i < den_p.size(); ++i) den_pad[deg + 1 - den_p.size() + i] = den_p[i];
     for (size_t i = 0; i < num_p.size(); ++i) num_pad[deg + 1 - num_p.size() + i] = num_p[i];
 
+    // Compute characteristic gain scale using geometric mean of pole/zero distances
+    // (Prevents a single distant zero like z = -30 from blowing up k_center = 30^5!)
     double span = 1.0;
-    for (const auto& p : poles) span = std::max(span, std::abs(p));
-    for (const auto& z : zeros) span = std::max(span, std::abs(z));
-    int p_diff = static_cast<int>(poles.size()) - static_cast<int>(zeros.size());
-    double k_center = (p_diff != 0) ? std::pow(span, p_diff) : 1.0;
+    double log_pole_sum = 0.0; int n_nz_poles = 0;
+    double log_zero_sum = 0.0; int n_nz_zeros = 0;
+    for (const auto& p : poles) {
+        double a = std::abs(p);
+        span = std::max(span, a);
+        if (a > 1e-3) { log_pole_sum += std::log(a); n_nz_poles++; }
+    }
+    for (const auto& z : zeros) {
+        double a = std::abs(z);
+        span = std::max(span, a);
+        if (a > 1e-3) { log_zero_sum += std::log(a); n_nz_zeros++; }
+    }
+    double r_pole = (n_nz_poles > 0) ? std::exp(log_pole_sum / n_nz_poles) : 1.0;
+    double r_zero = (n_nz_zeros > 0) ? std::exp(log_zero_sum / n_nz_zeros) : r_pole;
+    double k_center = std::pow(r_pole, static_cast<double>(poles.size())) /
+                      std::max(1e-12, std::pow(r_zero, static_cast<double>(zeros.size())));
+    k_center = std::clamp(k_center, 1e-4, 1e8);
 
     std::vector<double> k_vals;
-    k_vals.reserve(num_steps + 64);
+    k_vals.reserve(num_steps + 128);
     k_vals.push_back(0.0);
     for (int i = 0; i < num_steps; ++i) {
-        double exp_v = -3.4 + 6.8 * double(i) / double(num_steps - 1);
+        double exp_v = -5.2 + 10.4 * double(i) / double(num_steps - 1);
         k_vals.push_back(k_center * std::pow(10.0, exp_v));
     }
 
     // Inject exact Breakaway / Break-In gains Kb (and dense micro-steps around Kb)
-    // so the locus curves pass directly through every breakaway/break-in point!
     if (!poles.empty()) {
         Poly dD = polyDeriv(den_p);
         Poly dN = polyDeriv(num_p);
@@ -1710,7 +1728,7 @@ inline std::vector<std::vector<Complex>> computeRootLocusBranches(const std::vec
             if (std::abs(n_val) < 1e-9) continue;
             double kb = -(d_val / n_val).real();
             if (kb > 1e-6 && std::isfinite(kb)) {
-                for (double delta : {-0.015, -0.004, -0.0008, -1e-5, 0.0, 1e-5, 0.0008, 0.004, 0.015}) {
+                for (double delta : {-0.02, -0.005, -0.001, -1e-5, 0.0, 1e-5, 0.001, 0.005, 0.02}) {
                     double k_inj = kb * (1.0 + delta);
                     if (k_inj > 0.0) k_vals.push_back(k_inj);
                 }
@@ -1719,36 +1737,82 @@ inline std::vector<std::vector<Complex>> computeRootLocusBranches(const std::vec
     }
     std::sort(k_vals.begin(), k_vals.end());
 
-    std::vector<std::vector<Complex>> branches(deg);
-    std::vector<Complex> prev_roots = (poles.size() == deg) ? poles : std::vector<Complex>{};
-
-    for (double k : k_vals) {
+    // Helper to solve and match roots at a given K to the previous root ordering
+    auto solveAndMatch = [&](double k, const std::vector<Complex>& prev) -> std::vector<Complex> {
         Poly char_poly = polyAdd(den_pad, polyScale(num_pad, Complex(k, 0.0)));
-        // Use fresh polynomial root solve near multiple roots to avoid Durand-Kerner stagnation
-        auto roots = solvePolynomialRoots(char_poly, nullptr);
-        if (roots.size() != deg) continue;
+        auto roots = solvePolynomialRoots(char_poly, prev.empty() ? nullptr : &prev);
+        if (roots.size() != deg) roots = solvePolynomialRoots(char_poly, nullptr);
+        if (roots.size() != deg || prev.empty()) return roots;
 
         std::vector<Complex> ordered(deg);
-        if (prev_roots.empty() || branches[0].empty()) {
-            ordered = roots;
-        } else {
-            std::vector<bool> used(deg, false);
+        std::vector<bool> used(deg, false);
+        for (size_t b = 0; b < deg; ++b) {
+            Complex last_pt = prev[b];
+            double best_d = 1e30;
+            size_t best_j = 0;
+            for (size_t j = 0; j < deg; ++j) {
+                if (!used[j]) {
+                    double d = std::abs(roots[j] - last_pt);
+                    if (d < best_d) { best_d = d; best_j = j; }
+                }
+            }
+            used[best_j] = true;
+            ordered[b] = roots[best_j];
+        }
+        return ordered;
+    };
+
+    std::vector<std::vector<Complex>> branches(deg);
+    std::vector<Complex> prev_roots = (poles.size() == deg) ? poles : std::vector<Complex>{};
+    double prev_k = 0.0;
+
+    // Maximum allowed s-plane distance before adaptive K-subdivision kicks in
+    const double max_arc_step = 0.022 * span;
+    const double view_bound   = 4.5 * span;
+
+    auto appendSubdivided = [&](auto& self, double k1, const std::vector<Complex>& r1,
+                                double k2, const std::vector<Complex>& r2, int depth) -> void {
+        if (depth < 6 && !r1.empty() && r2.size() == deg) {
+            bool needs_split = false;
             for (size_t b = 0; b < deg; ++b) {
-                Complex last_pt = branches[b].back();
-                double best_d = 1e30;
-                size_t best_j = 0;
-                for (size_t j = 0; j < deg; ++j) {
-                    if (!used[j]) {
-                        double d = std::abs(roots[j] - last_pt);
-                        if (d < best_d) { best_d = d; best_j = j; }
+                // Subdivide if visible branch segment is too long in the s-plane
+                if (std::abs(r1[b]) < view_bound || std::abs(r2[b]) < view_bound) {
+                    if (std::abs(r2[b] - r1[b]) > max_arc_step) {
+                        needs_split = true;
+                        break;
                     }
                 }
-                used[best_j] = true;
-                ordered[b] = roots[best_j];
+            }
+            if (needs_split) {
+                double k_mid = (k1 <= 0.0) ? (0.25 * k2) : std::sqrt(k1 * k2);
+                auto r_mid = solveAndMatch(k_mid, r1);
+                if (r_mid.size() == deg) {
+                    // Re-match r2 against r_mid for cleaner continuity around sharp bends
+                    auto r2_refined = solveAndMatch(k2, r_mid);
+                    self(self, k1, r1, k_mid, r_mid, depth + 1);
+                    self(self, k_mid, r_mid, k2, r2_refined, depth + 1);
+                    return;
+                }
             }
         }
-        for (size_t b = 0; b < deg; ++b) branches[b].push_back(ordered[b]);
+        for (size_t b = 0; b < deg; ++b) branches[b].push_back(r2[b]);
+    };
+
+    for (size_t idx = 0; idx < k_vals.size(); ++idx) {
+        double k = k_vals[idx];
+        auto ordered = solveAndMatch(k, prev_roots);
+        if (ordered.size() != deg) continue;
+
+        if (branches[0].empty()) {
+            for (size_t b = 0; b < deg; ++b) branches[b].push_back(ordered[b]);
+        } else {
+            appendSubdivided(appendSubdivided, prev_k, prev_roots, k, ordered, 0);
+            for (size_t b = 0; b < deg; ++b) prev_roots[b] = branches[b].back();
+            prev_k = k;
+            continue;
+        }
         prev_roots = ordered;
+        prev_k = k;
     }
     return branches;
 }

@@ -26,11 +26,12 @@ public:
     SignalPlotterTab* sig_tab;
 
     explicit UnifiedControlSuiteWindow(QWidget* parent = nullptr) : QMainWindow(parent) {
-        setWindowTitle("PZSuite");
+        setWindowTitle("ezPZ - Control & DSP Workbench");
+        setWindowIcon(QIcon(":/ezpz.svg"));
         resize(900, 600);
         setStyleSheet(QString("QMainWindow { background-color: %1; }").arg(Theme::BG_WINDOW));
 
-        QSettings settings("ControlSuite", "PZSuite");
+        QSettings settings("ControlSuite", "ezPZ");
         model.loadFromSettings(settings);
         int saved_theme = model.theme_index;
         Theme::setTheme(0);
@@ -406,7 +407,7 @@ public:
     }
 
     void closeEvent(QCloseEvent* event) override {
-        QSettings settings("ControlSuite", "PZSuite");
+        QSettings settings("ControlSuite", "ezPZ");
         model.saveToSettings(settings);
         settings.setValue("calc/expressions", calc_tab->getExpressions());
         settings.setValue("win/active_tab", stack->currentIndex());

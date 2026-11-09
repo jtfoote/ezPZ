@@ -523,36 +523,90 @@ protected:
                 }
             }
 
-            // 6. jw-Axis Crossings: Re(s) = 0 along Root Locus branches
+            // 6. jw-Axis Crossings: Re(s) = 0 along Root Locus branches (with Exact Angle Polishing)
             if (show_jw_crossings) {
+                auto polishJwCrossing = [&](double w_init, double w_lo, double w_hi) -> std::pair<bool, double> {
+                    // On the Root Locus (K > 0), a point s = j*w is on the locus iff angleDeficiency(j*w) == 0.
+                    auto angleErr = [&](double w) -> double {
+                        auto ev = evaluateTransferFunction(poles, zeros, Complex(0.0, w), 1.0);
+                        // Signed angle error from ±180 deg in [-180, 180]
+                        double err = std::fmod(ev.angle_deg - 180.0, 360.0);
+                        if (err <= -180.0) err += 360.0;
+                        if (err >   180.0) err -= 360.0;
+                        return err;
+                    };
+
+                    double w = w_init;
+                    for (int it = 0; it < 12; ++it) {
+                        double f = angleErr(w);
+                        if (std::abs(f) < 1e-9) return {true, w};
+                        double eps = std::max(1e-6, std::abs(w) * 1e-5);
+                        double df = (angleErr(w + eps) - angleErr(w - eps)) / (2.0 * eps);
+                        if (std::abs(df) < 1e-12) break;
+                        double w_next = w - f / df;
+                        // Keep within reasonable neighborhood of the bracket
+                        double pad = std::max(2.0, std::abs(w_hi - w_lo) * 2.0);
+                        if (w_next < std::min(w_lo, w_hi) - pad || w_next > std::max(w_lo, w_hi) + pad) break;
+                        w = w_next;
+                    }
+                    return {std::abs(angleErr(w)) < 0.05, w};
+                };
+
+                auto addUniqueJw = [&](Complex jw_pt, double k_val) {
+                    if (!std::isfinite(k_val) || k_val < -1e-7) return;
+                    k_val = std::max(0.0, k_val);
+                    for (const auto& cp : critical_points) {
+                        if (cp.label_tag == "jω" && std::abs(cp.pt - jw_pt) < 1e-2 * span) return;
+                    }
+                    critical_points.push_back({
+                        jw_pt,
+                        k_val,
+                        std::abs(jw_pt.imag()),
+                        "jω",
+                        QColor("#22d3ee") // Bright Cyan
+                    });
+                };
+
+                // 6A. Open-loop poles starting directly on the jw-axis at K = 0 (excluding origin s = 0)
+                for (const auto& p_ol : poles) {
+                    if (std::abs(p_ol.real()) < 1e-5 && std::abs(p_ol.imag()) > 1e-4) {
+                        addUniqueJw(Complex(0.0, p_ol.imag()), 0.0);
+                    }
+                }
+
+                // 6B. Exact analytical check for real-axis crossing through the origin (s = 0)
+                if (!poles.empty()) {
+                    Poly D_ol = polyFromRoots(poles);
+                    Poly N_ol = polyFromRoots(zeros);
+                    double d0 = D_ol.back().real();
+                    double n0 = N_ol.back().real();
+                    if (std::abs(n0) > 1e-10 && std::abs(d0) > 1e-10) {
+                        double k_orig = -d0 / n0;
+                        if (k_orig > 1e-6) {
+                            addUniqueJw(Complex(0.0, 0.0), k_orig);
+                        }
+                    }
+                }
+
+                // 6C. Branch sign-change detection + exact Newton angle polishing on s = j*w
                 for (const auto& br : branches) {
                     for (size_t i = 0; i + 1 < br.size(); ++i) {
                         double r1 = br[i].real();
                         double r2 = br[i + 1].real();
-                        // Detect crossing across Re(s) = 0 (excluding origin pole/zero at K=0)
                         if ((r1 < -1e-7 && r2 >= -1e-7) || (r1 > 1e-7 && r2 <= 1e-7)) {
                             double denom = r1 - r2;
                             if (std::abs(denom) < 1e-12) continue;
                             double t_f = r1 / denom;
-                            double w_cross = br[i].imag() + t_f * (br[i + 1].imag() - br[i].imag());
-                            Complex jw_pt(0.0, w_cross);
-                            if (std::abs(w_cross) < 1e-4) continue; // Skip origin s=0 trivial crossing
+                            double w1 = br[i].imag(), w2 = br[i + 1].imag();
+                            double w_guess = w1 + t_f * (w2 - w1);
+                            if (std::abs(w_guess) < 1e-4) continue; // Origin handled by 6B
 
-                            bool dup = false;
-                            for (const auto& cp : critical_points) {
-                                if (cp.label_tag == "jω" && std::abs(cp.pt - jw_pt) < 1e-2 * span) { dup = true; break; }
-                            }
-                            if (dup) continue;
-
+                            auto [ok, w_exact] = polishJwCrossing(w_guess, w1, w2);
+                            double w_final = ok ? w_exact : w_guess;
+                            Complex jw_pt(0.0, w_final);
                             auto ev = evaluateTransferFunction(poles, zeros, jw_pt, 1.0);
                             if (std::isfinite(ev.rl_gain_k) && ev.rl_gain_k > 0.0) {
-                                critical_points.push_back({
-                                    jw_pt,
-                                    ev.rl_gain_k,
-                                    std::abs(w_cross),
-                                    "jω",
-                                    QColor("#22d3ee") // Bright Cyan
-                                });
+                                addUniqueJw(jw_pt, ev.rl_gain_k);
                             }
                         }
                     }
