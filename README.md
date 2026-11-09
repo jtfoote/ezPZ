@@ -60,5 +60,43 @@ Pre-compiled standalone bundles for **Windows**, **macOS (Universal Intel & Appl
 chmod +x ezPZ-Linux-x86_64.AppImage
 ./ezPZ-Linux-x86_64.AppImage
 ```
+## 💡 Tips & Hidden Features
 
+While most controls in **ezPZ** are interactive via sliders and tables, several advanced capabilities are tucked into context menus, syntax parsers, and secondary dialogs. Click any topic below to expand:
+
+<details>
+<summary><b>1. Symbolic Algebra (Using Unknown Variables like <code>K</code> or <code>x</code>)</b></summary>
+<br>
+
+**ezPZ** includes a built-in rational symbolic algebra engine (`SymRat`):
+* **Routh-Hurwitz & Block Diagram Studio:** You can type `K` directly inside transfer function numerators, denominators, or block expressions (e.g., `K / (s*(s+2))` or `s^3 + 6s^2 + 8s + K`). The solver will automatically construct the symbolic Routh array or Mason's gain reduction in terms of $K$ and solve for the exact stability range.
+* **Scientific Calculator:** Declare a free symbolic variable on a line using `sym x` (or `sym K`), then use it in subsequent rows—including inside complex impedance calls like `parallel(10, 1/(s*C))`—to get simplified rational polynomial fractions.
+</details>
+
+<details>
+<summary><b>2. Canvas Interactions, Pole-Sweep Mode & Target Bullseyes</b></summary>
+<br>
+
+* **Pan & Zoom:** Scroll wheel zooms toward the cursor; click-and-drag pans the complex plane.
+* **Snap to Critical Landmarks:** Enable the checkboxes for **Breakaway/In**, **$j\omega$ Crossings**, or **Spec Boundaries ($\zeta, T_s, T_p$)**. Clicking near any green $\odot$ intersection bullseye or critical marker snaps the active test point directly onto that coordinate and displays the required loop gain $K$ and compensator angle deficiency $\Delta\theta$.
+* **Root Contour (Pole Sweep) Mode:** In the $s$-Plane Root Locus tab, switch the mode dropdown from **Sweep Gain $K$** to **Sweep Open-Loop Pole $s = -a$** to lock $K = K_0$ and trace how the closed-loop poles move as a single plant pole varies from $0 \to \infty$.
+</details>
+
+<details>
+<summary><b>3. Keep vs. Change Design Matrix & Step-by-Step Homework Derivations</b></summary>
+<br>
+
+* Click **Design Parameters...** in the Continuous Time-Response tab to open the **Keep vs. Change Synthesizer**.
+* Lock any two compatible second-order specifications (e.g., lock `%OS` and `Ts` to **KEEP**, and set `ζ`, `ω_n`, `Kp`, `Kd` to **CHANGE**).
+* Click **▶ Show Calc** on any solved row (or toggle **Show All Calculations**) to expand the full symbolic formula, numerical substitution, and step-by-step derivation used to compute that parameter.
+</details>
+
+<details>
+<summary><b>4. Independent vs. Synced Tabs & Custom Feedback <code>H(s)</code></b></summary>
+<br>
+
+* **Cross-Tab Sync Toggle (`Sync ON` / `Sync OFF`):** Located in the top navigation bar (and `⚙ Settings`). By default, editing $G(s)$ in the Root Locus tab updates the Time Response and Bode tabs automatically. Toggle Sync **OFF** if you want to compare two different transfer functions across tabs without overwriting them.
+* **Non-Unity Feedback $H(s)$ / $H_{\text{fb}}(z)$:** Switch the feedback bar from **Unity $H=1$** to **Custom $H(s)$** to reveal a dedicated pole-zero and polynomial editor for your sensor/feedback transfer function. Click the formula toggle button (`Formula: G(s), H(s)` $\leftrightarrow$ `Formula: Closed-Loop T(s)`) to switch the live LaTeX banner between open-loop components and the reduced closed-loop transfer function $T(s) = \frac{C(s)G(s)}{1 + C(s)G(s)H(s)}$.
+* **Classroom Rounding Rules (`⚙ Settings`):** Need your numbers to match hand-calculated homework rules (e.g., 3 decimal places for $0 < |x| < 1$ and 2 decimal places for $|x| \ge 1$, plus intermediate step-rounding)? Open **⚙ Settings** in the top bar to switch rounding modes globally.
+</details>
 
