@@ -381,16 +381,18 @@ public:
         connect(send_btn, &QPushButton::clicked, this, [this]() {
             if (!std::isfinite(last_gain) || last_gain < 0.0) return;
 
-            bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 && !model->poles.empty());
+            int vary_idx = (vary_pole_combo && vary_pole_combo->currentData().isValid())
+                ? vary_pole_combo->currentData().toInt()
+                : -1;
+            bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 &&
+                                  vary_idx >= 0 && vary_idx < static_cast<int>(model->poles.size()));
+
             if (is_pole_sweep) {
-                int vary_idx = vary_pole_combo
-                    ? std::clamp(vary_pole_combo->currentIndex(), 0, static_cast<int>(model->poles.size()) - 1)
-                    : 0;
                 double fixed_k0 = edit_fixed_k0
                     ? std::max(0.0, parseNumericInput(edit_fixed_k0->text().toStdString(), 10.0))
                     : 10.0;
 
-                // Update the selected open-loop pole to s = -a (where a = last_gain)
+                // Update the selected real open-loop pole to s = -a (where a = last_gain)
                 model->poles[vary_idx] = Complex(-last_gain, 0.0);
                 model->plant_gain = fixed_k0;
 
@@ -400,10 +402,14 @@ public:
                 den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
                 refreshVaryPoleCombo();
                 updating_ui = false;
+                evaluateCurrent(true);
 
                 // Send fixed_k0 to PID Simulator and sync tabs
                 if (onSendGainToPid) onSendGainToPid(fixed_k0);
             } else {
+                // If user is in Vary Pole mode with no real poles, don't accidentally send K
+                if (locus_param_combo && locus_param_combo->currentIndex() == 1 && vary_idx < 0) return;
+
                 if (model->comp_enabled_s) {
                     model->c_gain = last_gain;
                     model->syncCompensatorToPidGains();
@@ -602,15 +608,21 @@ public:
         if (!vary_pole_combo) return;
         bool prev = updating_ui;
         updating_ui = true;
-        int prev_idx = std::max(0, vary_pole_combo->currentIndex());
+        int prev_data = vary_pole_combo->currentData().isValid() ? vary_pole_combo->currentData().toInt() : -1;
         vary_pole_combo->clear();
+        int restore_combo_idx = 0;
         for (size_t i = 0; i < model->poles.size(); ++i) {
-            vary_pole_combo->addItem(QString("p%1 = %2")
-                .arg(i + 1)
-                .arg(QString::fromStdString(PRECISION.fmtComplex(model->poles[i]))));
+            if (std::abs(model->poles[i].imag()) <= 1e-5) { // Only physically realizable real poles!
+                if (static_cast<int>(i) == prev_data) restore_combo_idx = vary_pole_combo->count();
+                vary_pole_combo->addItem(
+                    QString("p%1 = %2").arg(i + 1).arg(QString::fromStdString(PRECISION.fmt(model->poles[i].real()))),
+                    static_cast<int>(i));
+            }
         }
-        if (vary_pole_combo->count() > 0) {
-            vary_pole_combo->setCurrentIndex(std::min(prev_idx, vary_pole_combo->count() - 1));
+        if (vary_pole_combo->count() == 0) {
+            vary_pole_combo->addItem("(No real poles)", -1);
+        } else {
+            vary_pole_combo->setCurrentIndex(restore_combo_idx);
         }
         updating_ui = prev;
     }
@@ -697,8 +709,14 @@ public:
                 .arg(QString::fromStdString(PRECISION.fmt(model->plant_gain))));
         }
 
-        bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 && !raw_loop_poles.empty());
-        int vary_idx = vary_pole_combo ? std::clamp(vary_pole_combo->currentIndex(), 0, std::max(0, static_cast<int>(raw_loop_poles.size()) - 1)) : 0;
+        int vary_idx = (vary_pole_combo && vary_pole_combo->currentData().isValid())
+            ? vary_pole_combo->currentData().toInt() : -1;
+        bool is_pole_sweep = (locus_param_combo && locus_param_combo->currentIndex() == 1 &&
+                              vary_idx >= 0 && vary_idx < static_cast<int>(raw_loop_poles.size()));
+        if (locus_param_combo && locus_param_combo->currentIndex() == 1 && vary_idx < 0) {
+            poly_status_lbl->setStyleSheet("color: #f59e0b; font-size: 10px; font-weight: bold; border:none;");
+            poly_status_lbl->setText("⚠ Vary Pole s = -a requires at least one real pole in G(s). Showing standard K locus.");
+        }
         double fixed_k0 = edit_fixed_k0 ? std::max(0.0, parseNumericInput(edit_fixed_k0->text().toStdString(), 10.0)) : 10.0;
 
         std::vector<Complex> loop_poles = raw_loop_poles;
@@ -713,7 +731,8 @@ public:
         std::string gs_ltx = fb_bar ? fb_bar->formatActiveLatexS(model, false)
                                     : formatTransferFunctionLatex(model->poles, model->zeros, model->plant_gain, "s", "G");
         if (is_pole_sweep) {
-            gs_ltx += " \\; \\mathbf{[Sweep\\; p_" + std::to_string(vary_idx + 1) + " = -a \\; @ \\; K_0 = " + PRECISION.fmt(fixed_k0) + "]}";
+            gs_ltx += " \\; , \\quad \\mathrm{Sweep}\\; p_{" + std::to_string(vary_idx + 1) +
+                      "} = -a \\; (K_0 = " + PRECISION.fmt(fixed_k0) + ")";
         }
         tf_math_w->setLatex(QString::fromStdString(gs_ltx));
 
@@ -721,11 +740,11 @@ public:
         auto ev = evaluateTransferFunction(loop_poles, loop_zeros, tp, 1.0);
         last_gain = ev.rl_gain_k;
         double def = computeAngleDeficiency(ev.angle_deg);
-        bool on_rl = ev.at_pole || (std::abs(def) <= tol);
+        bool on_rl = ev.at_pole || ev.at_zero || (std::abs(def) <= tol);
 
-        val_angle->setText(ev.at_pole ? "Undefined" : QString::fromStdString(PRECISION.fmt(ev.angle_deg) + "°"));
+        val_angle->setText((ev.at_pole || ev.at_zero) ? "Undefined" : QString::fromStdString(PRECISION.fmt(ev.angle_deg) + "°"));
         val_mag->setText(ev.at_pole ? "Inf" : QString::fromStdString(PRECISION.fmt(ev.magnitude)));
-        val_gain->setText(QString::fromStdString(PRECISION.fmt(ev.rl_gain_k)));
+        val_gain->setText(ev.at_zero ? "Inf" : QString::fromStdString(PRECISION.fmt(ev.rl_gain_k)));
 
         QString bg = on_rl ? Theme::BANNER_OK_BG : Theme::BANNER_WARN_BG;
         QString bd = on_rl ? Theme::BANNER_OK_BD : Theme::BANNER_WARN_BD;
@@ -746,10 +765,20 @@ public:
         banner_right->setText(on_rl
             ? QString("|Δθ| = %1° (≤ %2°)").arg(QString::fromStdString(PRECISION.fmt(std::abs(def))), QString::number(tol))
             : QString("Deficiency Δθ = %1°").arg(QString::fromStdString(PRECISION.fmt(def, true))));
-        banner_sub->setText(on_rl
-            ? QString("Angle condition ∠G(s)H(s) = ±180°(2k+1) satisfied — Closed-loop pole at s for K = %1").arg(QString::fromStdString(PRECISION.fmt(ev.rl_gain_k)))
-            : QString("Off by %1° from ±180° (requires %2° compensator phase to place pole at s)")
-                  .arg(QString::fromStdString(PRECISION.fmt(std::abs(def))), QString::fromStdString(PRECISION.fmt(def, true))));
+        if (ev.at_pole && ev.at_zero) {
+            banner_sub->setText("Exact open-loop pole-zero cancellation at s");
+        } else if (ev.at_pole) {
+            banner_sub->setText("Open-loop pole — Root Locus branch starting point (K = 0)");
+        } else if (ev.at_zero) {
+            banner_sub->setText("Open-loop zero — Root Locus branch endpoint (K → ∞)");
+        } else if (on_rl) {
+            banner_sub->setText(QString("Angle condition ∠G(s)H(s) = ±180°(2k+1) satisfied — Closed-loop pole at s for K = %1")
+                .arg(QString::fromStdString(PRECISION.fmt(ev.rl_gain_k))));
+        } else {
+            banner_sub->setText(QString("Off by %1° from ±180° (requires %2° compensator phase to place pole at s)")
+                .arg(QString::fromStdString(PRECISION.fmt(std::abs(def))),
+                     QString::fromStdString(PRECISION.fmt(def, true))));
+        }
 
         // Pass combined loop poles and zeros to the s-plane canvas
         canvas->poles = loop_poles;
@@ -773,7 +802,7 @@ public:
         canvas->show_tp_line   = chk_tp_spec->isChecked();
         canvas->spec_tp        = std::max(1e-4, parseNumericInput(edit_tp_spec->text().toStdString(), 1.0));
         canvas->show_zeta_line = chk_zeta_spec->isChecked();
-        canvas->spec_zeta      = std::clamp(parseNumericInput(edit_zeta_spec->text().toStdString(), 0.7071), 0.0, 0.9999);
+        canvas->spec_zeta      = std::clamp(parseNumericInput(edit_zeta_spec->text().toStdString(), 0.7071), 0.0, 1.0);
 
         // Compute Live Closed-Loop Poles for 1 + K * G(s)H(s) = 0 using loop_poles & loop_zeros
         canvas->show_live_k_poles = chk_live_k->isChecked();

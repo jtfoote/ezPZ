@@ -1632,19 +1632,33 @@ struct TFEvalResult {
     double rl_gain_k = 0.0;
     Complex complex_val = {0.0, 0.0};
     bool at_pole = false;
+    bool at_zero = false;
 };
 
 // Note: matches Python evaluate_transfer_function where Root Locus angle/mag conditions
 // are evaluated on the monic ratio prod(v - z_i)/prod(v - p_j) when checking K = 1/|G(v)|.
-inline TFEvalResult evaluateTransferFunction(const std::vector<Complex>& poles, const std::vector<Complex>& zeros, Complex test_pt, double gain = 1.0) {
+inline TFEvalResult evaluateTransferFunction(
+    const std::vector<Complex>& poles,
+    const std::vector<Complex>& zeros,
+    Complex test_pt,
+    double gain = 1.0)
+{
     Complex num_val(gain, 0.0);
     double num_mag = std::abs(gain);
     double zero_ang = (gain >= 0.0) ? 0.0 : PI;
+    bool hit_zero = false;
     for (const auto& z : zeros) {
         Complex d = test_pt - z;
-        num_val *= d;
-        num_mag *= std::abs(d);
-        if (std::abs(d) > 0.0) zero_ang += std::arg(d);
+        double md = std::abs(d);
+        if (md < 1e-11) {
+            hit_zero = true;
+            num_val = Complex(0.0, 0.0);
+            num_mag = 0.0;
+        } else {
+            num_val *= d;
+            num_mag *= md;
+            zero_ang += std::arg(d);
+        }
     }
 
     Complex den_val(1.0, 0.0);
@@ -1654,11 +1668,15 @@ inline TFEvalResult evaluateTransferFunction(const std::vector<Complex>& poles, 
         Complex d = test_pt - p;
         double md = std::abs(d);
         if (md < 1e-11) {
-            return {180.0, std::numeric_limits<double>::infinity(), 0.0, Complex(0.0, 0.0), true};
+            return {180.0, std::numeric_limits<double>::infinity(), 0.0, Complex(0.0, 0.0), true, hit_zero};
         }
         den_val *= d;
         den_mag *= md;
         pole_ang += std::arg(d);
+    }
+
+    if (hit_zero) {
+        return {180.0, 0.0, std::numeric_limits<double>::infinity(), Complex(0.0, 0.0), false, true};
     }
 
     Complex val = num_val / den_val;
@@ -1668,7 +1686,7 @@ inline TFEvalResult evaluateTransferFunction(const std::vector<Complex>& poles, 
     net_deg = std::fmod(net_deg + 180.0, 360.0);
     if (net_deg < 0.0) net_deg += 360.0;
     net_deg -= 180.0;
-    return {net_deg, mag, k_rl, val, false};
+    return {net_deg, mag, k_rl, val, false, false};
 }
 
 inline std::vector<std::vector<Complex>> computeRootLocusBranches(

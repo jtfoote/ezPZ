@@ -451,7 +451,7 @@ protected:
             }
 
             // 3. Damping Ratio zeta Rays: s = -r*zeta ± j*r*sqrt(1 - zeta^2)
-            if (show_zeta_line && spec_zeta >= 0.0 && spec_zeta < 1.0) {
+            if (show_zeta_line && spec_zeta >= 0.0 && spec_zeta <= 1.0) {
                 QColor z_col("#facc15"); // Amber-Gold
                 double sin_th = std::sqrt(std::max(0.0, 1.0 - spec_zeta * spec_zeta));
                 double ray_len = span * 4.0;
@@ -461,7 +461,7 @@ protected:
 
                 p.setPen(QPen(z_col, 1.5, Qt::DashLine));
                 p.drawLine(p_orig, p_up);
-                p.drawLine(p_orig, p_dn);
+                if (sin_th > 1e-6) p.drawLine(p_orig, p_dn);
 
                 QPointF lbl_pos = toPx({-0.38 * span * spec_zeta, 0.38 * span * sin_th});
                 p.setFont(QFont("Monospace", 8, QFont::Bold));
@@ -470,7 +470,9 @@ protected:
                     .arg(QString::fromStdString(PRECISION.fmt(niseOsFromZeta(spec_zeta)))));
 
                 // Ray equation in LHP: sin_th * Re(s) + spec_zeta * |Im(s)| = 0
-                for (double sign_im : {1.0, -1.0}) {
+                std::vector<double> signs = (sin_th > 1e-6) ? std::vector<double>{1.0, -1.0}
+                                                            : std::vector<double>{1.0};
+                for (double sign_im : signs) {
                     for (const auto& br : branches) {
                         for (size_t i = 0; i + 1 < br.size(); ++i) {
                             if (br[i].real() > 1e-4 && br[i + 1].real() > 1e-4) continue;
@@ -492,27 +494,82 @@ protected:
                 }
             }
 
-            // Draw Intersection Diamonds & Callout Badges (K and omega_n)
+            // 3B. Pairwise Spec-Line Target Intersections (Ts∩Tp, ζ∩Ts, ζ∩Tp) — Clickable to Snap!
+            bool valid_ts = (show_ts_line && spec_ts > 1e-4);
+            bool valid_tp = (show_tp_line && spec_tp > 1e-4);
+            bool valid_z  = (show_zeta_line && spec_zeta >= 0.0 && spec_zeta <= 1.0);
+
+            auto addSpecTarget = [&](Complex spt, const QString& stag, const QColor& col) {
+                auto ev_t = evaluateTransferFunction(poles, zeros, spt, 1.0);
+                current_intersections.push_back({spt, ev_t.rl_gain_k, std::abs(spt), stag, col});
+            };
+
+            if (valid_ts && valid_tp) {
+                double sig = -4.0 / spec_ts;
+                double wd  = PI / spec_tp;
+                addSpecTarget({sig,  wd}, "Ts∩Tp", QColor("#2dd4bf"));
+                addSpecTarget({sig, -wd}, "Ts∩Tp", QColor("#2dd4bf"));
+            }
+            if (valid_ts && valid_z && spec_zeta > 1e-4) {
+                double sig = -4.0 / spec_ts;
+                double wd  = (-sig) * std::sqrt(std::max(0.0, 1.0 - spec_zeta * spec_zeta)) / spec_zeta;
+                addSpecTarget({sig,  wd}, "ζ∩Ts", QColor("#34d399"));
+                if (wd > 1e-6) addSpecTarget({sig, -wd}, "ζ∩Ts", QColor("#34d399"));
+            }
+            if (valid_tp && valid_z && spec_zeta < 1.0 - 1e-6) {
+                double wd  = PI / spec_tp;
+                double sig = -wd * spec_zeta / std::sqrt(std::max(1e-12, 1.0 - spec_zeta * spec_zeta));
+                addSpecTarget({sig,  wd}, "ζ∩Tp", QColor("#c084fc"));
+                addSpecTarget({sig, -wd}, "ζ∩Tp", QColor("#c084fc"));
+            }
+
+            // Draw RL Intersection Diamonds (◆) & Spec-Pair Target Bullseyes (⊙) + Callouts
             p.setFont(QFont("Monospace", 8, QFont::Bold));
             for (const auto& ix : current_intersections) {
                 QPointF ipx = toPx(ix.pt);
-                QPolygonF dia;
-                dia << (ipx + QPointF(0, -6)) << (ipx + QPointF(6, 0))
-                    << (ipx + QPointF(0,  6)) << (ipx + QPointF(-6, 0));
-                p.setPen(QPen(Qt::white, 1.2));
-                p.setBrush(ix.color);
-                p.drawPolygon(dia);
+                bool is_spec_pair = ix.spec_tag.contains("∩");
 
-                // Draw compact dark callout label next to intersection
-                if (ix.pt.imag() >= -1e-4) { // Label upper-half-plane & real axis to prevent conjugate clutter
-                    QString txt = QString("[%1] K=%2, ωn=%3")
-                        .arg(ix.spec_tag)
-                        .arg(QString::fromStdString(PRECISION.fmt(ix.gain_k)))
-                        .arg(QString::fromStdString(PRECISION.fmt(ix.wn)));
+                if (is_spec_pair) {
+                    // Concentric bullseye marker (⊙) for spec-line intersections
+                    p.setPen(QPen(Qt::white, 1.3));
+                    p.setBrush(badge_bg);
+                    p.drawEllipse(ipx, 6.8, 6.8);
+                    p.setPen(QPen(ix.color, 1.5));
+                    p.setBrush(ix.color);
+                    p.drawEllipse(ipx, 3.0, 3.0);
+                } else {
+                    // Diamond marker (◆) for Root Locus crossings
+                    QPolygonF dia;
+                    dia << (ipx + QPointF(0, -6)) << (ipx + QPointF(6, 0))
+                        << (ipx + QPointF(0,  6)) << (ipx + QPointF(-6, 0));
+                    p.setPen(QPen(Qt::white, 1.2));
+                    p.setBrush(ix.color);
+                    p.drawPolygon(dia);
+                }
+
+                // Draw compact callout label on upper-half-plane & real axis to prevent conjugate clutter
+                if (ix.pt.imag() >= -1e-4) {
+                    QString txt;
+                    if (is_spec_pair) {
+                        auto ev_s = evaluateTransferFunction(poles, zeros, ix.pt, 1.0);
+                        double def_d = computeAngleDeficiency(ev_s.angle_deg);
+                        txt = QString("[%1] s=%2 | Δθ=%3°, K=%4")
+                            .arg(ix.spec_tag)
+                            .arg(QString::fromStdString(PRECISION.fmtComplex(ix.pt)))
+                            .arg(QString::fromStdString(PRECISION.fmt(def_d, true)))
+                            .arg(ev_s.at_zero ? "Inf" : QString::fromStdString(PRECISION.fmt(ix.gain_k)));
+                    } else {
+                        txt = QString("[%1] K=%2, ωn=%3")
+                            .arg(ix.spec_tag)
+                            .arg(QString::fromStdString(PRECISION.fmt(ix.gain_k)))
+                            .arg(QString::fromStdString(PRECISION.fmt(ix.wn)));
+                    }
+
                     QFontMetrics fm(p.font());
                     int tw = fm.horizontalAdvance(txt) + 10;
                     QColor fg_col = Theme::is_light ? ix.color.darker(135) : ix.color;
-                    QRectF box(ipx.x() + 8, ipx.y() - 20, tw, 18);
+                    double y_off = is_spec_pair ? 8.0 : -20.0; // Offset below for bullseye so it doesn't collide with RL diamond!
+                    QRectF box(ipx.x() + 8, ipx.y() + y_off, tw, 18);
                     p.setBrush(badge_bg);
                     p.setPen(QPen(fg_col, 1.1));
                     p.drawRoundedRect(box, 3, 3);
@@ -520,7 +577,7 @@ protected:
                     p.drawText(box, Qt::AlignCenter, txt);
                 }
             }
-
+            
             // 4. Draw Live Gain K Closed-Loop Poles (■)
             if (show_live_k_poles && !live_cl_poles.empty()) {
                 for (const auto& cp : live_cl_poles) {
@@ -795,8 +852,13 @@ protected:
                     Complex d = poles[k] - zi;
                     if (std::abs(d) >= 1e-5) sum_z_deg += std::arg(d) * (180.0 / PI);
                 }
-                double theta_dep = wrapDeg((180.0 + sum_z_deg - sum_p_deg) / std::max(1, mult));
-                dep_arr_list.push_back({poles[k], theta_dep, true});
+                // double theta_dep = wrapDeg((180.0 + sum_z_deg - sum_p_deg) / std::max(1, mult));
+                // At the end of // 1. Compute Angles of Departure for Complex Poles:
+                int q = std::max(1, mult);
+                for (int m = 0; m < q; ++m) {
+                    double theta_dep = wrapDeg((180.0 * (2 * m + 1) + sum_z_deg - sum_p_deg) / q);
+                    dep_arr_list.push_back({poles[k], theta_dep, true});
+                }
             }
 
             // 2. Compute Angles of Arrival for Complex Zeros (|Im(z)| > 1e-4)
@@ -819,8 +881,11 @@ protected:
                     if (std::abs(d) < 1e-5) ++mult;
                     else sum_z_deg += std::arg(d) * (180.0 / PI);
                 }
-                double theta_arr = wrapDeg((180.0 - sum_z_deg + sum_p_deg) / std::max(1, mult));
-                dep_arr_list.push_back({zeros[k], theta_arr, false});
+                int q = std::max(1, mult);
+                for (int m = 0; m < q; ++m) {
+                    double theta_arr = wrapDeg((180.0 * (2 * m + 1) - sum_z_deg + sum_p_deg) / q);
+                    dep_arr_list.push_back({zeros[k], theta_arr, false});
+                }
             }
 
             // 3. Render Reference 0° Line, Angle Arc, Tangent Vector Arrow & Callout Badge
