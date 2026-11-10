@@ -326,7 +326,7 @@ class CompensatorConfigCard : public QFrame {
 public:
     QCheckBox* enable_chk;
     QLineEdit *c_num_edit, *c_den_edit, *kc_edit;
-    QWidget* body_w;
+    QWidget *inputs_w, *pz_w;
     PoleZeroEditorCard *c_poles_card, *c_zeros_card;
     bool updating = false;
     bool p_cards_authoritative = false;
@@ -339,7 +339,7 @@ public:
         vl->setContentsMargins(10, 6, 10, 6);
         vl->setSpacing(4);
 
-        // Header Row: Title + Enable Checkbox + Quick Solve
+        // Header Row: Title + Enable Checkbox
         auto* hdr = new QHBoxLayout();
         auto* title = new QLabel("Controller / Compensator  Gc(s) = Kc · Num_c(s) / Den_c(s)");
         title->setStyleSheet("color: #34d399; font-weight: bold; font-size: 11px; border: none;");
@@ -353,15 +353,13 @@ public:
         hdr->addWidget(enable_chk);
         vl->addLayout(hdr);
 
-        // Collapsible Body (Visible when Enable Gc(s) is checked, or always accessible)
-        body_w = new QWidget();
-        body_w->setStyleSheet("background: transparent; border: none;");
-        auto* bl = new QVBoxLayout(body_w);
-        bl->setContentsMargins(0, 2, 0, 0);
-        bl->setSpacing(4);
-
-        auto* p_row = new QHBoxLayout();
+        // Tier 1: Num_c(s), Den_c(s), Kc row (visible, enabled only when checked)
+        inputs_w = new QWidget();
+        inputs_w->setStyleSheet("background: transparent; border: none;");
+        auto* p_row = new QHBoxLayout(inputs_w);
+        p_row->setContentsMargins(0, 2, 0, 0);
         p_row->setSpacing(6);
+
         auto* nc_l = new QLabel("Num_c(s):");
         nc_l->setStyleSheet("color: #34d399; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
         c_num_edit = makeDarkEntry("1");
@@ -380,10 +378,12 @@ public:
         p_row->addWidget(dc_l); p_row->addWidget(c_den_edit, 1);
         p_row->addWidget(kc_l); p_row->addWidget(kc_edit);
         p_row->addWidget(solve_c_btn);
-        bl->addLayout(p_row);
+        vl->addWidget(inputs_w);
 
-        // Editable Gc(s) Poles (×) & Gc(s) Zeros (○) Tables
-        auto* cpz_row = new QHBoxLayout();
+        // Tier 2: Editable Gc(s) Poles (×) & Zeros (○) Tables (hidden when disabled)
+        pz_w = new QWidget();
+        pz_w->setStyleSheet("background: transparent; border: none;");
+        auto* cpz_row = new QHBoxLayout(pz_w);
         cpz_row->setContentsMargins(0, 2, 0, 0);
         cpz_row->setSpacing(6);
         c_poles_card = new PoleZeroEditorCard("Gc(s) Poles (×)", "#a78bfa", -4.0);
@@ -393,13 +393,16 @@ public:
         c_poles_card->syncHeightWithPeer();
         cpz_row->addWidget(c_poles_card, 1);
         cpz_row->addWidget(c_zeros_card, 1);
-        bl->addLayout(cpz_row);
+        vl->addWidget(pz_w);
 
-        body_w->setEnabled(false);
-        vl->addWidget(body_w);
+        // Initial disabled state: gray out inputs_w and hide pz_w
+        inputs_w->setEnabled(false);
+        pz_w->setVisible(false);
 
         connect(enable_chk, &QCheckBox::toggled, this, [this](bool en) {
-            body_w->setEnabled(en);
+            inputs_w->setEnabled(en);
+            pz_w->setVisible(en);
+            pz_w->setEnabled(en);
             if (!updating && onChanged) onChanged();
         });
 
@@ -472,7 +475,9 @@ public:
     void loadFromModelS(const SharedSystemModel* m) {
         updating = true;
         enable_chk->setChecked(m->comp_enabled_s);
-        body_w->setEnabled(m->comp_enabled_s);
+        inputs_w->setEnabled(m->comp_enabled_s);
+        pz_w->setVisible(m->comp_enabled_s);
+        pz_w->setEnabled(m->comp_enabled_s);
         c_poles_card->setValues(m->c_poles);
         c_zeros_card->setValues(m->c_zeros);
         c_num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(m->c_zeros, "s")));

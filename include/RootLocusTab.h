@@ -30,7 +30,6 @@ public:
     QLabel *live_k_poles_lbl;
 
     QLineEdit* edit_max_k;
-    MathFormulaWidget* rl_design_formula_w;
     std::map<std::string, bool> rl_lock_map = {
         {"kp", false}, {"kd", true}, {"ki", true}, {"os_pct", true},
         {"zeta", false}, {"wn", false}, {"ts", false}, {"tp", false},
@@ -131,35 +130,6 @@ public:
             evaluateCurrent(true);
         };
 
-
-        // 3. Test Point s & Cartesian / Polar Switcher Card
-        auto* tp_card = makeCard();
-        auto* tp_l = new QVBoxLayout(tp_card);
-        tp_l->setContentsMargins(10, 8, 10, 8);
-        auto* tp_hdr = new QHBoxLayout();
-        auto* tp_title = new QLabel("Test Point  s  &  Angle Tolerance");
-        tp_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_PID));
-        cart_radio  = new QRadioButton("Cartesian"); cart_radio->setChecked(true);
-        polar_radio = new QRadioButton("Polar");
-        for (auto* rb : {cart_radio, polar_radio}) {
-            rb->setStyleSheet(QString("QRadioButton { color: %1; font-weight: bold; font-size: 11px; border: none; }").arg(Theme::TEXT_PRIMARY));
-        }
-        tp_hdr->addWidget(tp_title); tp_hdr->addStretch(); tp_hdr->addWidget(cart_radio); tp_hdr->addWidget(polar_radio);
-        tp_l->addLayout(tp_hdr);
-
-        auto* tp_grid = new QGridLayout();
-        tp_lbl1 = new QLabel("Real (σ)"); tp_lbl1->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
-        tp_lbl2 = new QLabel("Imag (jω)"); tp_lbl2->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
-        auto* l_tl = new QLabel("Tol (±°)"); l_tl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
-        tp_v1_edit = makeDarkEntry(QString::number(model->test_point.real()));
-        tp_v2_edit = makeDarkEntry(QString::number(model->test_point.imag()));
-        tol_edit   = makeDarkEntry(QString::number(model->rl_tol_deg), 60);
-        tp_grid->addWidget(tp_lbl1, 0, 0); tp_grid->addWidget(tp_v1_edit, 1, 0);
-        tp_grid->addWidget(tp_lbl2, 0, 1); tp_grid->addWidget(tp_v2_edit, 1, 1);
-        tp_grid->addWidget(l_tl,    0, 2); tp_grid->addWidget(tol_edit,   1, 2);
-        tp_l->addLayout(tp_grid);
-        left_v->addWidget(tp_card);
-
         // 3B. s-Plane Design Specs (Ts, Tp, zeta) & Live Gain K Pole Explorer Card
         auto* spec_card = makeCard();
         auto* spec_l = new QVBoxLayout(spec_card);
@@ -239,16 +209,10 @@ public:
         spec_l->addLayout(k_row);
 
         auto* d_row = new QHBoxLayout();
-        auto* rl_design_btn = makeActionBtn("Design Controller ➔", "#0b0e14", Theme::ACCENT_PID);
-        auto* rl_params_btn = makeActionBtn("🎛 Design Parameters...", Theme::ACCENT_ZERO);
-        d_row->addWidget(rl_design_btn);
+        auto* rl_params_btn = makeActionBtn("Design Parameters...", Theme::ACCENT_ZERO);
         d_row->addWidget(rl_params_btn);
         d_row->addStretch();
         spec_l->addLayout(d_row);
-
-        rl_design_formula_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 9);
-        rl_design_formula_w->setVisible(false);
-        spec_l->addWidget(rl_design_formula_w);
 
         live_k_poles_lbl = new QLabel("Enable Ts, Tp, ζ to view RL intersections (K, ωn) or click Design Parameters.");
         live_k_poles_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-size: 10px; border: none;");
@@ -256,6 +220,34 @@ public:
         spec_l->addWidget(live_k_poles_lbl);
 
         left_v->addWidget(spec_card);
+
+        // 3. Test Point s & Cartesian / Polar Switcher Card
+        auto* tp_card = makeCard();
+        auto* tp_l = new QVBoxLayout(tp_card);
+        tp_l->setContentsMargins(10, 8, 10, 8);
+        auto* tp_hdr = new QHBoxLayout();
+        auto* tp_title = new QLabel("Test Point  s  &  Angle Tolerance");
+        tp_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_PID));
+        cart_radio  = new QRadioButton("Cartesian"); cart_radio->setChecked(true);
+        polar_radio = new QRadioButton("Polar");
+        for (auto* rb : {cart_radio, polar_radio}) {
+            rb->setStyleSheet(QString("QRadioButton { color: %1; font-weight: bold; font-size: 11px; border: none; }").arg(Theme::TEXT_PRIMARY));
+        }
+        tp_hdr->addWidget(tp_title); tp_hdr->addStretch(); tp_hdr->addWidget(cart_radio); tp_hdr->addWidget(polar_radio);
+        tp_l->addLayout(tp_hdr);
+
+        auto* tp_grid = new QGridLayout();
+        tp_lbl1 = new QLabel("Real (σ)"); tp_lbl1->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        tp_lbl2 = new QLabel("Imag (jω)"); tp_lbl2->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        auto* l_tl = new QLabel("Tol (±°)"); l_tl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
+        tp_v1_edit = makeDarkEntry(QString::number(model->test_point.real()));
+        tp_v2_edit = makeDarkEntry(QString::number(model->test_point.imag()));
+        tol_edit   = makeDarkEntry(QString::number(model->rl_tol_deg), 60);
+        tp_grid->addWidget(tp_lbl1, 0, 0); tp_grid->addWidget(tp_v1_edit, 1, 0);
+        tp_grid->addWidget(tp_lbl2, 0, 1); tp_grid->addWidget(tp_v2_edit, 1, 1);
+        tp_grid->addWidget(l_tl,    0, 2); tp_grid->addWidget(tol_edit,   1, 2);
+        tp_l->addLayout(tp_grid);
+        left_v->addWidget(tp_card);
 
         // 4. Evaluation Results Card (Turns Orange when OFF Root Locus!)
         auto* res_card = makeCard();
@@ -507,8 +499,6 @@ public:
         });
 
         auto applyRlDesign = [this](const ConstraintMatrixAnalysis& ans) {
-            rl_design_formula_w->setVisible(true);
-            rl_design_formula_w->setLatex(QString::fromStdString(ans.formulas_latex));
             model->pid_enabled = true;
             model->kp = ans.solved.at("kp");
             model->ki = ans.solved.at("ki");
@@ -528,14 +518,6 @@ public:
             chk_live_k->setChecked(true);
             evaluateCurrent(true);
         };
-
-        connect(rl_design_btn, &QPushButton::clicked, this, [this, applyRlDesign]() {
-            rl_input_map["kp"] = model->kp;
-            rl_input_map["kd"] = model->kd;
-            rl_input_map["ki"] = model->ki;
-            auto ans = ParameterMatrixEngine::evaluate(rl_lock_map, rl_input_map, model);
-            applyRlDesign(ans);
-        });
 
         connect(rl_params_btn, &QPushButton::clicked, this, [this, applyRlDesign]() {
             rl_input_map["kp"] = model->kp;
@@ -572,8 +554,6 @@ public:
                     }
                     edit_live_k->setText(QString::fromStdString(PRECISION.fmt(comp.k_c)));
                     chk_live_k->setChecked(true);
-                    rl_design_formula_w->setVisible(true);
-                    rl_design_formula_w->setLatex(QString::fromStdString(comp.gc_latex + " \\quad | \\quad " + comp.steps_latex));
                     updating_ui = false;
 
                     evaluateCurrent(true);
@@ -584,7 +564,6 @@ public:
                     updating_ui = true;
                     if (comp_card) comp_card->loadFromModelS(model);
                     if (chk_ghost_rl) chk_ghost_rl->setChecked(false);
-                    rl_design_formula_w->setVisible(false);
                     updating_ui = false;
                     evaluateCurrent(true);
                 }
