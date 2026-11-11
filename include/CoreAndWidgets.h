@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Jaden Foote
+//
+// CoreAndWidgets.h
+// Description: ezPZ Core & Widgets Header
+
 #pragma once
 #include "CommonIncludes.h"
 
@@ -12,13 +18,10 @@ using Poly = std::vector<Complex>;
 
 static constexpr double PI = 3.14159265358979323846;
 
-// =============================================================================
-// Unified Modern Dark-Slate Engineering Theme
-// =============================================================================
 namespace Theme {
     inline int current_theme = 0;
     inline bool is_light     = false;
-
+    // Default theme definition (Midnight Slate)
     inline QString BG_WINDOW      = "#0b0e14";
     inline QString BG_HEADER      = "#080b10";
     inline QString BG_PANEL       = "#121722";
@@ -64,12 +67,15 @@ namespace Theme {
 
     inline QStringList themeNames() {
         return {
-            "🌙 Midnight Slate (Default Dark)",
-            "☀️ Crisp Daylight (Light)",
-            "☕ Catppuccin Mocha",
-            "❄️ Nord Polar",
-            "🌲 Gruvbox Retro Dark",
-            "📜 Solarized Paper (Warm Light)"
+            "Midnight Slate (Default Dark)",
+            "Crisp Daylight (Light)",
+            "Catppuccin Mocha",
+            "Nord Polar",
+            "Gruvbox Retro Dark",
+            "Solarized Paper (Warm Light)",
+            "Tokyo Night",
+            "Retro CRT",
+            "Rose Pine Dawn"
         };
     }
 
@@ -90,10 +96,10 @@ namespace Theme {
 
     inline void setTheme(int idx) {
         current_theme = idx;
-        is_light = (idx == 1 || idx == 5);
+        is_light = (idx == 1 || idx == 5 || idx == 8);
 
         switch (idx) {
-        case 1: // ☀️ Crisp Daylight (Light)
+        case 1: // Crisp Daylight (Light)
             BG_WINDOW      = "#f1f5f8"; BG_HEADER      = "#e2e8ef";
             BG_PANEL       = "#ffffff"; BG_PANEL_ALT   = "#f8fafc";
             BG_INPUT       = "#fffffe"; BG_PLOT        = "#fcfdff";
@@ -113,7 +119,7 @@ namespace Theme {
             GRID_MAJOR     = "#e2e8f1"; AXIS_LINE      = "#94a3b9";
             break;
 
-        case 2: // ☕ Catppuccin Mocha
+        case 2: // Catppuccin Mocha
             BG_WINDOW      = "#1e1e2e"; BG_HEADER      = "#11111b";
             BG_PANEL       = "#181825"; BG_PANEL_ALT   = "#313244";
             BG_INPUT       = "#141420"; BG_PLOT        = "#191926";
@@ -133,7 +139,7 @@ namespace Theme {
             GRID_MAJOR     = "#2a2b3d"; AXIS_LINE      = "#585b71";
             break;
 
-        case 3: // ❄️ Nord Polar
+        case 3: // Nord Polar
             BG_WINDOW      = "#2e3440"; BG_HEADER      = "#242933";
             BG_PANEL       = "#3b4252"; BG_PANEL_ALT   = "#434c5e";
             BG_INPUT       = "#292e39"; BG_PLOT        = "#2b303c";
@@ -153,7 +159,7 @@ namespace Theme {
             GRID_MAJOR     = "#363d4c"; AXIS_LINE      = "#616e87";
             break;
 
-        case 4: // 🌲 Gruvbox Retro Dark
+        case 4: // Gruvbox Retro Dark
             BG_WINDOW      = "#1d2021"; BG_HEADER      = "#141617";
             BG_PANEL       = "#282828"; BG_PANEL_ALT   = "#32302f";
             BG_INPUT       = "#181a1b"; BG_PLOT        = "#1b1d1e";
@@ -173,7 +179,7 @@ namespace Theme {
             GRID_MAJOR     = "#2e2c2b"; AXIS_LINE      = "#665c55";
             break;
 
-        case 5: // 📜 Solarized Paper (Warm Light)
+        case 5: // Solarized Paper (Warm Light)
             BG_WINDOW      = "#fdf6e3"; BG_HEADER      = "#eee8d5";
             BG_PANEL       = "#faf3e0"; BG_PANEL_ALT   = "#f2ecda";
             BG_INPUT       = "#fffdf7"; BG_PLOT        = "#fefbf1";
@@ -192,8 +198,65 @@ namespace Theme {
             BANNER_ERR_BG  = "#f9dedd"; BANNER_ERR_BD  = "#dc322e"; BANNER_ERR_FG  = "#a8201d";
             GRID_MAJOR     = "#eae3cf"; AXIS_LINE      = "#93a1a2";
             break;
+        case 6: // Tokyo Night
+            BG_WINDOW      = "#1a1b26"; BG_HEADER      = "#13141c";
+            BG_PANEL       = "#1f2335"; BG_PANEL_ALT   = "#24283b";
+            BG_INPUT       = "#16161e"; BG_PLOT        = "#151621";
+            BG_KEY_NUM     = "#292e42"; BG_KEY_FN      = "#222638";
+            BG_KEY_ACCENT  = "#3d59a1";
+            BORDER_PANEL   = "#2f3549"; BORDER_INPUT   = "#3b4261";
+            BORDER_FOCUS   = "#7aa2f7"; BORDER_BTN     = "#414868";
+            TEXT_PRIMARY   = "#c0caf5"; TEXT_SECONDARY = "#a9b1d6";
+            TEXT_MUTED     = "#737aa2";
+            ACCENT_POLE    = "#f7768e"; ACCENT_ZERO    = "#7dcfff";
+            ACCENT_PID     = "#9ece6a"; ACCENT_LOCUS   = "#bb9af7";
+            ACCENT_ARROW   = "#e0af68"; ACCENT_ASYMP   = "#2ac3de";
+            ACCENT_OPEN    = "#ff9e64"; ACCENT_IMAG    = "#ff007c";
+            BANNER_OK_BG   = "#1c312d"; BANNER_OK_BD   = "#73daca"; BANNER_OK_FG   = "#9ece6b";
+            BANNER_WARN_BG = "#332b22"; BANNER_WARN_BD = "#e0af67"; BANNER_WARN_FG = "#f0c674";
+            BANNER_ERR_BG  = "#362029"; BANNER_ERR_BD  = "#db4b4b"; BANNER_ERR_FG  = "#f7768d";
+            GRID_MAJOR     = "#23273a"; AXIS_LINE      = "#565f89";
+            break;
+        case 7: // Phosphor Oscilloscope (Retro CRT)
+            BG_WINDOW      = "#050a06"; BG_HEADER      = "#030604";
+            BG_PANEL       = "#08110a"; BG_PANEL_ALT   = "#0c190f";
+            BG_INPUT       = "#040805"; BG_PLOT        = "#020503";
+            BG_KEY_NUM     = "#112416"; BG_KEY_FN      = "#0d1c11";
+            BG_KEY_ACCENT  = "#166534";
+            BORDER_PANEL   = "#14331d"; BORDER_INPUT   = "#1b4326";
+            BORDER_FOCUS   = "#39ff14"; BORDER_BTN     = "#235330";
+            TEXT_PRIMARY   = "#b8ffbe"; TEXT_SECONDARY = "#74e382";
+            TEXT_MUTED     = "#3e8e4c";
+            ACCENT_POLE    = "#ff5533"; ACCENT_ZERO    = "#00ffcc";
+            ACCENT_PID     = "#39ff15"; ACCENT_LOCUS   = "#ccff00";
+            ACCENT_ARROW   = "#ffe600"; ACCENT_ASYMP   = "#00d9a6";
+            ACCENT_OPEN    = "#ffaa00"; ACCENT_IMAG    = "#ff3399";
+            BANNER_OK_BG   = "#092612"; BANNER_OK_BD   = "#22c55e"; BANNER_OK_FG   = "#4ade80";
+            BANNER_WARN_BG = "#261f06"; BANNER_WARN_BD = "#eab308"; BANNER_WARN_FG = "#facc16";
+            BANNER_ERR_BG  = "#290c0a"; BANNER_ERR_BD  = "#ef4445"; BANNER_ERR_FG  = "#f87172";
+            GRID_MAJOR     = "#0e2213"; AXIS_LINE      = "#296639";
+            break;
 
-        case 0: // 🌙 Midnight Slate (Default Dark)
+        case 8: // Rosé Pine Dawn (Soft Light)
+            BG_WINDOW      = "#faf4ed"; BG_HEADER      = "#f2e9e1";
+            BG_PANEL       = "#fffaf3"; BG_PANEL_ALT   = "#f4ede8";
+            BG_INPUT       = "#ffffff"; BG_PLOT        = "#fdf9f3";
+            BG_KEY_NUM     = "#ebe0d8"; BG_KEY_FN      = "#f1e7df";
+            BG_KEY_ACCENT  = "#286983";
+            BORDER_PANEL   = "#dfdad9"; BORDER_INPUT   = "#cecacd";
+            BORDER_FOCUS   = "#56949f"; BORDER_BTN     = "#9893a5";
+            TEXT_PRIMARY   = "#575279"; TEXT_SECONDARY = "#6e6a86";
+            TEXT_MUTED     = "#797593";
+            ACCENT_POLE    = "#b4637a"; ACCENT_ZERO    = "#286984";
+            ACCENT_PID     = "#3e8fb0"; ACCENT_LOCUS   = "#907aa9";
+            ACCENT_ARROW   = "#ea9d34"; ACCENT_ASYMP   = "#56949e";
+            ACCENT_OPEN    = "#d7827e"; ACCENT_IMAG    = "#c44b70";
+            BANNER_OK_BG   = "#e2f0ec"; BANNER_OK_BD   = "#286982"; BANNER_OK_FG   = "#1f5368";
+            BANNER_WARN_BG = "#faecd8"; BANNER_WARN_BD = "#ea9d35"; BANNER_WARN_FG = "#b57419";
+            BANNER_ERR_BG  = "#f7e2e7"; BANNER_ERR_BD  = "#b4637b"; BANNER_ERR_FG  = "#8f4258";
+            GRID_MAJOR     = "#ece4dc"; AXIS_LINE      = "#b8b3c2";
+            break;
+        case 0: // Midnight Slate (Default Dark)
         default:
             current_theme  = 0;
             is_light       = false;
@@ -216,11 +279,6 @@ namespace Theme {
             GRID_MAJOR     = "#1a2233"; AXIS_LINE      = "#3b4963";
             break;
         }
-    }
-
-    // Backwards-compatible helper so exportWidgetToSvg still works seamlessly
-    inline void setLightMode(bool light) {
-        setTheme(light ? 1 : 0);
     }
 }
 
@@ -247,7 +305,7 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     generator.setTitle("ezPZ Plot");
 
     canvas->render(&generator);
-
+    // Reset theme back to whatever the user had before
     if (force_light_theme) {
         Theme::setTheme(prev_theme);
         canvas->update();
@@ -259,7 +317,7 @@ inline void attachSvgExportMenu(QWidget* canvas, const QString& default_svg_name
     canvas->setContextMenuPolicy(Qt::CustomContextMenu);
     QObject::connect(canvas, &QWidget::customContextMenuRequested, canvas, [canvas, default_svg_name](const QPoint& pos) {
         QMenu menu(canvas);
-        QAction* act_light = menu.addAction("Export SVG (Light Theme for Notes)");
+        QAction* act_light = menu.addAction("Export SVG (Light Theme)");
         QAction* act_dark  = menu.addAction("Export SVG (Dark Theme)");
         QAction* chosen = menu.exec(canvas->mapToGlobal(pos));
         if (chosen == act_light) {
@@ -271,10 +329,9 @@ inline void attachSvgExportMenu(QWidget* canvas, const QString& default_svg_name
 }
 
 
-// =============================================================================
-// Engine 00: Classroom Decimal Precision & Unit-Safe Numeric Parser
-// =============================================================================
+// Engine 00: Decimal Precision & Formatting Configuration
 struct PrecisionConfig {
+    // Default decimal precision settings
     std::string mode = "class";
     int dec_sub1 = 3;
     int dec_ge1  = 2;
@@ -2950,7 +3007,7 @@ public:
 
     void loadFromSettings(QSettings& s) {
         theme_index = s.value("app/theme_index", 0).toInt();
-        light_mode  = (theme_index == 1 || theme_index == 5);
+        light_mode  = Theme::is_light;
         Theme::setTheme(theme_index);
         PRECISION.mode       = s.value("app/prec_mode", "class").toString().toStdString();
         PRECISION.dec_sub1   = s.value("app/dec_sub1", 3).toInt();

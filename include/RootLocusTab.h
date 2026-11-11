@@ -84,9 +84,9 @@ public:
         pgrid->addWidget(dl, 0, 2); pgrid->addWidget(den_edit, 0, 3);
         poly_l->addLayout(pgrid);
 
-        poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
-        poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
-        poly_l->addWidget(poly_status_lbl);
+        // poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
+        // poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
+        // poly_l->addWidget(poly_status_lbl);
 
         // Editable G(s) Poles (×) & G(s) Zeros (○) Tables directly under G(s) Num/Den
         auto* pz_row = new QHBoxLayout();
@@ -191,7 +191,7 @@ public:
         spec_l->addLayout(mode_row);
 
         auto* k_row = new QHBoxLayout();
-        chk_live_k = new QCheckBox("Vary Gain K (■ CL Poles):");
+        chk_live_k = new QCheckBox("Vary Gain K (×/○ CL):");
         chk_live_k->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 10px;").arg(Theme::ACCENT_PID));
         edit_live_k = makeDarkEntry("1.0", 50);
         slider_live_k = new QSlider(Qt::Horizontal);
@@ -490,7 +490,7 @@ public:
             vary_pole_combo->setVisible(pole_mode);
             lbl_fixed_k0->setVisible(pole_mode);
             edit_fixed_k0->setVisible(pole_mode);
-            chk_live_k->setText(pole_mode ? "Vary Pole a (■ CL Poles):" : "Vary Gain K (■ CL Poles):");
+            chk_live_k->setText(pole_mode ? "Vary Pole a (×/○ CL):" : "Vary Gain K (×/○ CL):");
             if (gain_title_lbl) gain_title_lbl->setText(pole_mode ? "POLE PARAM a (s = -a)" : "REQUIRED GAIN K");
             refreshVaryPoleCombo();
             evaluateCurrent(false);
@@ -808,7 +808,7 @@ public:
         canvas->show_zeta_line = chk_zeta_spec->isChecked();
         canvas->spec_zeta      = std::clamp(parseNumericInput(edit_zeta_spec->text().toStdString(), 0.7071), 0.0, 1.0);
 
-        // Compute Live Closed-Loop Poles for 1 + K * G(s)H(s) = 0 using loop_poles & loop_zeros
+        // Compute Live Closed-Loop Poles & Zeros
         canvas->show_live_k_poles = chk_live_k->isChecked();
         canvas->live_k_val = std::max(0.0, parseNumericInput(edit_live_k->text().toStdString(), 1.0));
         if (canvas->show_live_k_poles) {
@@ -823,16 +823,34 @@ public:
             Poly char_poly = polyAdd(den_pad, polyScale(num_pad, Complex(canvas->live_k_val, 0.0)));
             canvas->live_cl_poles = solvePolynomialRoots(char_poly);
 
-            std::string p_list;
+            // Closed-loop zeros of T(s) = K*Gc(s)*G(s) / (1 + K*Gc(s)*G(s)*H(s)):
+            // Forward zeros of G(s) and Gc(s), plus poles of feedback H(s) when non-unity
+            std::vector<Complex> cl_z = model->zeros;
+            if (model->comp_enabled_s) {
+                cl_z.insert(cl_z.end(), model->c_zeros.begin(), model->c_zeros.end());
+            }
+            if (!model->unity_feedback_s) {
+                cl_z.insert(cl_z.end(), model->h_poles.begin(), model->h_poles.end());
+            }
+            canvas->live_cl_zeros = cl_z;
+
+            std::string p_list, z_list;
             for (size_t i = 0; i < canvas->live_cl_poles.size(); ++i) {
                 p_list += (i ? ",  " : "") + PRECISION.fmtComplex(canvas->live_cl_poles[i]);
             }
-            live_k_poles_lbl->setText(QString("CL Poles @ K=%1:  [%2]")
+            for (size_t i = 0; i < canvas->live_cl_zeros.size(); ++i) {
+                z_list += (i ? ",  " : "") + PRECISION.fmtComplex(canvas->live_cl_zeros[i]);
+            }
+            QString param_sym = is_pole_sweep ? "a" : "K";
+            live_k_poles_lbl->setText(QString("CL Poles @ %1=%2: [%3]  •  CL Zeros: [%4]")
+                .arg(param_sym)
                 .arg(QString::fromStdString(PRECISION.fmt(canvas->live_k_val)))
-                .arg(QString::fromStdString(p_list)));
+                .arg(p_list.empty() ? "None" : QString::fromStdString(p_list))
+                .arg(z_list.empty() ? "None" : QString::fromStdString(z_list)));
         } else {
             canvas->live_cl_poles.clear();
-            live_k_poles_lbl->setText("Tip: Click any [Ts], [Tp], [ζ], [Brk], or [jω] marker on the locus to snap Test Point s to it.");
+            canvas->live_cl_zeros.clear();
+            live_k_poles_lbl->setText("Enable Ts, Tp, ζ to view RL intersections (K, ωn) or click Design Parameters.");
         }
 
         canvas->repaint();

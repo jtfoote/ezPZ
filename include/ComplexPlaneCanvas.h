@@ -47,6 +47,7 @@ public:
     bool show_live_k_poles = false;
     double live_k_val = 1.0;
     std::vector<Complex> live_cl_poles;
+    std::vector<Complex> live_cl_zeros;
 
     // Breakaway / Break-In & jw-Axis Crossing Overlays
     bool show_breakaway = true;
@@ -95,6 +96,11 @@ protected:
     void computeAutoBounds() {
         std::vector<Complex> pts = poles;
         pts.insert(pts.end(), zeros.begin(), zeros.end());
+
+        if (show_live_k_poles) {
+            pts.insert(pts.end(), live_cl_poles.begin(), live_cl_poles.end());
+            pts.insert(pts.end(), live_cl_zeros.begin(), live_cl_zeros.end());
+        }
 
         if (show_ghost_locus) {
             pts.insert(pts.end(), ghost_poles.begin(), ghost_poles.end());
@@ -639,25 +645,6 @@ protected:
                 }
             }
 
-            // 4. Draw Live Gain K Closed-Loop Poles (■)
-            if (show_live_k_poles && !live_cl_poles.empty()) {
-                for (const auto& cp : live_cl_poles) {
-                    QPointF cpx = toPx(cp);
-                    QRectF sq(cpx.x() - 5.5, cpx.y() - 5.5, 11.0, 11.0);
-                    p.setBrush(QColor(Theme::ACCENT_PID));
-                    p.setPen(QPen(Qt::white, 1.4));
-                    p.drawRect(sq);
-                    if (cp.imag() >= -1e-4) {
-                        p.setPen(QColor(Theme::ACCENT_PID));
-                        p.setFont(QFont("Monospace", 8, QFont::Bold));
-                        p.drawText(cpx + QPointF(8, 14), QString("s_CL(%1) [%2=%3]")
-                            .arg(QString::fromStdString(PRECISION.fmtComplex(cp)))
-                            .arg(param_sym)
-                            .arg(QString::fromStdString(PRECISION.fmt(live_k_val))));
-                    }
-                }
-            }
-
             // 5. Real-Axis Breakaway / Break-In Points: N(s)*D'(s) - D(s)*N'(s) = 0
             critical_points.clear();
             if (show_breakaway && !poles.empty()) {
@@ -854,32 +841,84 @@ protected:
         }
         
 
-        // Zeros (o)
-        p.setPen(QPen(QColor(Theme::ACCENT_ZERO), 2.2));
-        p.setBrush(QColor(Theme::BG_PLOT));
-        for (const auto& z : zeros) p.drawEllipse(toPx(z), 6.0, 6.0);
-
-        // Poles (x)
-        p.setPen(QPen(QColor(Theme::ACCENT_POLE), 2.2));
-        for (const auto& pl : poles) {
-            QPointF px = toPx(pl);
-            p.drawLine(px + QPointF(-6, -6), px + QPointF(6, 6));
-            p.drawLine(px + QPointF(-6, 6), px + QPointF(6, -6));
+        // Open-Loop Zeros (○) — ghosted when Vary Gain K is active
+        {
+            QColor ol_z_col(Theme::ACCENT_ZERO);
+            if (show_live_k_poles) {
+                ol_z_col.setAlpha(80);
+                p.setPen(QPen(ol_z_col, 1.5, Qt::DashLine));
+                p.setBrush(Qt::NoBrush);
+            } else {
+                p.setPen(QPen(ol_z_col, 2.2));
+                p.setBrush(QColor(Theme::BG_PLOT));
+            }
+            for (const auto& zr : zeros) {
+                p.drawEllipse(toPx(zr), 5.5, 5.5);
+            }
         }
 
-        // Compensator Gc(s) Zeros (○) & Poles (×) Highlighted in Emerald Green (#34d399)
+        // Open-Loop Poles (×) — ghosted when Vary Gain K is active
+        {
+            QColor ol_p_col(Theme::ACCENT_POLE);
+            if (show_live_k_poles) ol_p_col.setAlpha(80);
+            p.setPen(QPen(ol_p_col, show_live_k_poles ? 1.5 : 2.2));
+            double r_p = show_live_k_poles ? 5.0 : 5.5;
+            for (const auto& pl : poles) {
+                QPointF ppx = toPx(pl);
+                p.drawLine(ppx + QPointF(-r_p, -r_p), ppx + QPointF(r_p,  r_p));
+                p.drawLine(ppx + QPointF(-r_p,  r_p), ppx + QPointF(r_p, -r_p));
+            }
+        }
+
+        // Compensator Gc(s) Open-Loop Zeros (○) & Poles (×) — also ghosted when Vary Gain K is active
         if (!comp_zeros.empty() || !comp_poles.empty()) {
             QColor comp_col("#34d399");
-            p.setPen(QPen(comp_col, 2.5));
-            p.setBrush(QColor(Theme::BG_PLOT));
+            if (show_live_k_poles) comp_col.setAlpha(85);
+            p.setPen(QPen(comp_col, show_live_k_poles ? 1.6 : 2.5));
+            p.setBrush(show_live_k_poles ? QBrush(Qt::NoBrush) : QBrush(QColor(Theme::BG_PLOT)));
             for (const auto& cz : comp_zeros) {
-                QPointF zpx = toPx(cz);
-                p.drawEllipse(zpx, 6.8, 6.8);
+                p.drawEllipse(toPx(cz), 6.5, 6.5);
             }
             for (const auto& cp : comp_poles) {
                 QPointF ppx = toPx(cp);
-                p.drawLine(ppx + QPointF(-6.5, -6.5), ppx + QPointF(6.5, 6.5));
-                p.drawLine(ppx + QPointF(-6.5,  6.5), ppx + QPointF(6.5, -6.5));
+                p.drawLine(ppx + QPointF(-6.2, -6.2), ppx + QPointF(6.2,  6.2));
+                p.drawLine(ppx + QPointF(-6.2,  6.2), ppx + QPointF(6.2, -6.2));
+            }
+        }
+
+        // Active Closed-Loop Zeros (○) & Closed-Loop Poles (×) when Vary Gain K is enabled
+        if (show_live_k_poles) {
+            // 1. Closed-Loop Zeros (○)
+            QColor cl_z_col(Theme::ACCENT_ZERO);
+            p.setPen(QPen(cl_z_col, 2.5));
+            p.setBrush(QColor(Theme::BG_PLOT)); // Masks ghosted OL zero / locus line inside the circle
+            for (const auto& cz : live_cl_zeros) {
+                QPointF zpx = toPx(cz);
+                p.drawEllipse(zpx, 6.0, 6.0);
+            }
+
+            // 2. Closed-Loop Poles (×) with subtle plot-background halo for contrast on the locus curve
+            QColor cl_p_col(Theme::ACCENT_POLE); // Swap to Theme::ACCENT_PID if you prefer green CL × markers
+            QColor halo_col(Theme::BG_PLOT);
+            halo_col.setAlpha(210);
+            p.setBrush(Qt::NoBrush);
+            for (const auto& cp : live_cl_poles) {
+                QPointF cpx = toPx(cp);
+                p.setPen(QPen(halo_col, 4.4, Qt::SolidLine, Qt::RoundCap));
+                p.drawLine(cpx + QPointF(-6.0, -6.0), cpx + QPointF(6.0,  6.0));
+                p.drawLine(cpx + QPointF(-6.0,  6.0), cpx + QPointF(6.0, -6.0));
+
+                p.setPen(QPen(cl_p_col, 2.6, Qt::SolidLine, Qt::RoundCap));
+                p.drawLine(cpx + QPointF(-6.0, -6.0), cpx + QPointF(6.0,  6.0));
+                p.drawLine(cpx + QPointF(-6.0,  6.0), cpx + QPointF(6.0, -6.0));
+
+                if (!is_z_plane && cp.imag() >= -1e-4) {
+                    p.setPen(QColor(Theme::ACCENT_PID));
+                    p.setFont(QFont("Monospace", 8, QFont::Bold));
+                    p.drawText(cpx + QPointF(8, 14), QString("s_CL(%1) [K=%2]")
+                        .arg(QString::fromStdString(PRECISION.fmtComplex(cp)))
+                        .arg(QString::fromStdString(PRECISION.fmt(live_k_val))));
+                }
             }
         }
 
