@@ -1,6 +1,292 @@
 #pragma once
 #include "CoreAndWidgets.h"
 
+enum class SecondOrderValidity { None, Valid, Marginal, Invalid };
+
+struct SecondOrderApproxReport {
+    SecondOrderValidity status = SecondOrderValidity::None;
+    bool has_dom_pair = false;
+    Complex dom_pole = {0.0, 0.0}; // Upper-half-plane dominant pole (-sigma_d + j*omega_d)
+    double sigma_d = 0.0;
+    double omega_d = 0.0;
+    double omega_n = 0.0;
+    double zeta = 0.0;
+    double min_ratio = std::numeric_limits<double>::infinity();
+    bool has_violator = false;
+    Complex violator_pt = {0.0, 0.0};
+    std::vector<std::pair<Complex, Complex>> dipoles; // Canceled (pole, zero) pairs
+    QString badge_text;
+    QString summary_text;
+};
+
+inline SecondOrderApproxReport analyzeSecondOrderApprox(
+    const std::vector<Complex>& cl_poles,
+    const std::vector<Complex>& cl_zeros)
+{
+    SecondOrderApproxReport r;
+    if (cl_poles.empty()) return r;
+
+    // 1. Strict closed-loop stability check across all algebraic poles
+    for (const auto& p : cl_poles) {
+        if (p.real() >= -1e-6) {
+            r.status = SecondOrderValidity::Invalid;
+            r.badge_text = "✖ Invalid (Unstable/Marginal)";
+            r.summary_text = QString("✖ 2nd-Order Invalid: Closed-loop pole s = %1 has Re(s) ≥ 0.")
+                .arg(QString::fromStdString(PRECISION.fmtComplex(p)));
+            return r;
+        }
+    }
+
+    std::vector<bool> p_canc(cl_poles.size(), false);
+    std::vector<bool> z_canc(cl_zeros.size(), false);
+
+    auto findConjIdx = [](const std::vector<Complex>& vec, const std::vector<bool>& used, size_t self_i) -> int {
+        Complex target = std::conj(vec[self_i]);
+        int best = -1;
+        double best_d = 1e-3 * std::max(1.0, std::abs(vec[self_i]));
+        for (size_t i = 0; i < vec.size(); ++i) {
+            if (i == self_i || used[i]) continue;
+            double d = std::abs(vec[i] - target);
+            if (d < best_d) { best_d = d; best = static_cast<int>(i); }
+        }
+        return best;
+    };
+
+    // 2A. Pass 1: Exact / near-exact pole-zero cancellations
+    for (size_t zi = 0; zi < cl_zeros.size(); ++zi) {
+        if (z_canc[zi]) continue;
+        const Complex& z = cl_zeros[zi];
+        if (std::abs(z.imag()) <= 1e-4) {
+            int best_p = -1;
+            double best_d = 1e30;
+            for (size_t pi = 0; pi < cl_poles.size(); ++pi) {
+                if (!p_canc[pi] && std::abs(cl_poles[pi].imag()) <= 1e-4) {
+                    double d = std::abs(cl_poles[pi] - z);
+                    if (d < best_d) { best_d = d; best_p = static_cast<int>(pi); }
+                }
+            }
+            if (best_p >= 0 && best_d <= 1e-2 * std::max(1.0, std::abs(cl_poles[static_cast<size_t>(best_p)]))) {
+                p_canc[static_cast<size_t>(best_p)] = true;
+                z_canc[zi] = true;
+                r.dipoles.push_back({cl_poles[static_cast<size_t>(best_p)], z});
+            }
+        } else if (z.imag() > 1e-4) {
+            int z_conj = findConjIdx(cl_zeros, z_canc, zi);
+            if (z_conj < 0) continue;
+            int best_p = -1, best_p_conj = -1;
+            double best_d = 1e30;
+            for (size_t pi = 0; pi < cl_poles.size(); ++pi) {
+                if (!p_canc[pi] && cl_poles[pi].imag() > 1e-4) {
+                    int pc = findConjIdx(cl_poles, p_canc, pi);
+                    if (pc >= 0) {
+                        double d = std::abs(cl_poles[pi] - z);
+                        if (d < best_d) { best_d = d; best_p = static_cast<int>(pi); best_p_conj = pc; }
+                    }
+                }
+            }
+            if (best_p >= 0 && best_d <= 1e-2 * std::max(1.0, std::abs(cl_poles[static_cast<size_t>(best_p)]))) {
+                p_canc[static_cast<size_t>(best_p)] = true;
+                p_canc[static_cast<size_t>(best_p_conj)] = true;
+                z_canc[zi] = true;
+                z_canc[static_cast<size_t>(z_conj)] = true;
+                r.dipoles.push_back({cl_poles[static_cast<size_t>(best_p)], z});
+                r.dipoles.push_back({cl_poles[static_cast<size_t>(best_p_conj)], cl_zeros[static_cast<size_t>(z_conj)]});
+            }
+        }
+    }
+
+    // 2B. Pass 2: Relative dipole cancellation (|p - z| <= 0.10 * |s_dom - p|, e.g. Lag / PI dipoles)
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (size_t zi = 0; zi < cl_zeros.size(); ++zi) {
+            if (z_canc[zi]) continue;
+            const Complex& z = cl_zeros[zi];
+            if (std::abs(z.imag()) <= 1e-4) {
+                int best_p = -1;
+                double best_d = 1e30;
+                for (size_t pi = 0; pi < cl_poles.size(); ++pi) {
+                    if (!p_canc[pi] && std::abs(cl_poles[pi].imag()) <= 1e-4) {
+                        double d = std::abs(cl_poles[pi] - z);
+                        if (d < best_d) { best_d = d; best_p = static_cast<int>(pi); }
+                    }
+                }
+                if (best_p >= 0) {
+                    bool has_ref = false;
+                    Complex s_ref = {0.0, 0.0};
+                    for (size_t k = 0; k < cl_poles.size(); ++k) {
+                        if (!p_canc[k] && static_cast<int>(k) != best_p) {
+                            if (!has_ref || cl_poles[k].real() > s_ref.real()) {
+                                s_ref = cl_poles[k];
+                                has_ref = true;
+                            }
+                        }
+                    }
+                    if (has_ref && best_d <= 0.10 * std::abs(s_ref - cl_poles[static_cast<size_t>(best_p)])) {
+                        p_canc[static_cast<size_t>(best_p)] = true;
+                        z_canc[zi] = true;
+                        r.dipoles.push_back({cl_poles[static_cast<size_t>(best_p)], z});
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    std::vector<Complex> unc_poles, unc_zeros;
+    for (size_t i = 0; i < cl_poles.size(); ++i) if (!p_canc[i]) unc_poles.push_back(cl_poles[i]);
+    for (size_t i = 0; i < cl_zeros.size(); ++i) if (!z_canc[i]) unc_zeros.push_back(cl_zeros[i]);
+
+    if (unc_poles.empty()) {
+        r.status = SecondOrderValidity::Invalid;
+        r.badge_text = "2nd-Ord N/A (All Canceled)";
+        r.summary_text = "ℹ 2nd-Order N/A: All closed-loop poles are canceled by zeros (static gain response).";
+        return r;
+    }
+
+    // 3. Identify slowest uncanceled pole(s)
+    double max_re = unc_poles[0].real();
+    for (const auto& p : unc_poles) max_re = std::max(max_re, p.real());
+    double re_tol = 1e-3 * std::max(1.0, std::abs(max_re));
+
+    int dom_pos = -1, dom_neg = -1;
+    double best_imag = -1.0;
+    for (size_t i = 0; i < unc_poles.size(); ++i) {
+        if (std::abs(unc_poles[i].real() - max_re) <= re_tol && unc_poles[i].imag() > 1e-4) {
+            if (unc_poles[i].imag() > best_imag) {
+                best_imag = unc_poles[i].imag();
+                dom_pos = static_cast<int>(i);
+            }
+        }
+    }
+    if (dom_pos >= 0) {
+        Complex target_conj = std::conj(unc_poles[static_cast<size_t>(dom_pos)]);
+        double best_cd = 1e30;
+        for (size_t i = 0; i < unc_poles.size(); ++i) {
+            if (static_cast<int>(i) == dom_pos) continue;
+            double d = std::abs(unc_poles[i] - target_conj);
+            if (d < best_cd) { best_cd = d; dom_neg = static_cast<int>(i); }
+        }
+    }
+
+    // Check for critically damped repeated real pair at max_re if not complex
+    if (dom_pos < 0 || dom_neg < 0) {
+        std::vector<int> real_at_max;
+        for (size_t i = 0; i < unc_poles.size(); ++i) {
+            if (std::abs(unc_poles[i].imag()) <= 1e-4 &&
+                std::abs(unc_poles[i].real() - max_re) <= 1e-2 * std::max(1.0, std::abs(max_re))) {
+                real_at_max.push_back(static_cast<int>(i));
+            }
+        }
+        if (real_at_max.size() >= 2) {
+            dom_pos = real_at_max[0];
+            dom_neg = real_at_max[1];
+        } else {
+            r.status = SecondOrderValidity::Invalid;
+            r.badge_text = "✖ Real-Pole Dominated (ζ ≥ 1)";
+            if (unc_poles.size() == 1 && unc_zeros.empty()) {
+                r.summary_text = QString("ℹ 1st-Order Dominant: Single uncanceled real pole s = %1 (monotonic, 0% OS — underdamped 2nd-order formulas N/A).")
+                    .arg(QString::fromStdString(PRECISION.fmt(max_re)));
+            } else {
+                r.summary_text = QString("✖ Underdamped 2nd-Order Invalid: Slow real pole s = %1 dominates transient (overdamped tail, ζ ≥ 1).")
+                    .arg(QString::fromStdString(PRECISION.fmt(max_re)));
+            }
+            return r;
+        }
+    }
+
+    r.has_dom_pair = true;
+    Complex p_dom = unc_poles[static_cast<size_t>(dom_pos)];
+    r.dom_pole = {p_dom.real(), std::abs(p_dom.imag())};
+    r.sigma_d = -r.dom_pole.real();
+    r.omega_d = r.dom_pole.imag();
+    r.omega_n = std::abs(r.dom_pole);
+    r.zeta = (r.omega_n > 1e-12) ? std::clamp(r.sigma_d / r.omega_n, 0.0, 1.0) : 1.0;
+
+    // 4. Check uncanceled zeros and remaining uncanceled poles against -5*sigma_d
+    for (const auto& z : unc_zeros) {
+        if (z.real() >= -1e-6) {
+            r.status = SecondOrderValidity::Invalid;
+            r.has_violator = true;
+            r.violator_pt = z;
+            r.min_ratio = -z.real() / std::max(r.sigma_d, 1e-9);
+            r.badge_text = "✖ Invalid (RHP Zero)";
+            r.summary_text = QString("✖ 2nd-Order Invalid: Uncanceled RHP/jω zero z = %1 causes non-minimum-phase undershoot.")
+                .arg(QString::fromStdString(PRECISION.fmtComplex(z)));
+            return r;
+        }
+    }
+
+    double min_p_ratio = std::numeric_limits<double>::infinity();
+    Complex worst_p = {0.0, 0.0};
+    for (size_t i = 0; i < unc_poles.size(); ++i) {
+        if (static_cast<int>(i) == dom_pos || static_cast<int>(i) == dom_neg) continue;
+        double ratio = -unc_poles[i].real() / std::max(r.sigma_d, 1e-9);
+        if (ratio < min_p_ratio) { min_p_ratio = ratio; worst_p = unc_poles[i]; }
+    }
+
+    double min_z_ratio = std::numeric_limits<double>::infinity();
+    Complex worst_z = {0.0, 0.0};
+    for (const auto& z : unc_zeros) {
+        double ratio = -z.real() / std::max(r.sigma_d, 1e-9);
+        if (ratio < min_z_ratio) { min_z_ratio = ratio; worst_z = z; }
+    }
+
+    r.min_ratio = std::min(min_p_ratio, min_z_ratio);
+    bool lim_is_zero = (min_z_ratio <= min_p_ratio);
+    Complex lim_pt = lim_is_zero ? worst_z : worst_p;
+
+    size_t dip_cnt = r.dipoles.size();
+    QString dip_note = (dip_cnt == 0) ? "" : QString(" [%1 dipole%2 canceled]").arg(dip_cnt).arg(dip_cnt > 1 ? "s" : "");
+    QString dom_str = QString("%1 ± j%2 (ζ=%3, ωn=%4)")
+        .arg(QString::fromStdString(PRECISION.fmt(r.dom_pole.real())))
+        .arg(QString::fromStdString(PRECISION.fmt(r.omega_d)))
+        .arg(QString::fromStdString(PRECISION.fmt(r.zeta)))
+        .arg(QString::fromStdString(PRECISION.fmt(r.omega_n)));
+
+    if (!std::isfinite(r.min_ratio)) {
+        r.status = SecondOrderValidity::Valid;
+        r.badge_text = dip_cnt ? "✔ 2nd-Ord Valid (Dipole Canceled)" : "✔ Exact 2nd-Order";
+        r.summary_text = QString("✔ 2nd-Order Valid: Dominant %1 — no extra uncanceled poles or zeros%2.")
+            .arg(dom_str, dip_note);
+    } else if (r.min_ratio >= 5.0) {
+        r.status = SecondOrderValidity::Valid;
+        r.badge_text = QString("✔ 2nd-Ord Valid (%1× ≥ 5×)").arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)));
+        r.summary_text = QString("✔ 2nd-Order Valid: s_dom = %1 | Nearest %2 (%3) is %4× σd (≥ 5×)%5.")
+            .arg(dom_str)
+            .arg(lim_is_zero ? "CL zero" : "3rd pole")
+            .arg(QString::fromStdString(PRECISION.fmtComplex(lim_pt)))
+            .arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)))
+            .arg(dip_note);
+    } else if (r.min_ratio >= 3.0) {
+        r.status = SecondOrderValidity::Marginal;
+        r.has_violator = true;
+        r.violator_pt = lim_pt;
+        r.badge_text = QString("⚠ Marginal (%1× σd)").arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)));
+        r.summary_text = QString("⚠ 2nd-Order Marginal (3×–5×): s_dom = %1 | %2 (%3) is %4× σd (%5)%6.")
+            .arg(dom_str)
+            .arg(lim_is_zero ? "Uncanceled CL zero" : "Non-dominant pole")
+            .arg(QString::fromStdString(PRECISION.fmtComplex(lim_pt)))
+            .arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)))
+            .arg(lim_is_zero ? "moderately raises %OS" : "slightly slows Tr & Ts")
+            .arg(dip_note);
+    } else {
+        r.status = SecondOrderValidity::Invalid;
+        r.has_violator = true;
+        r.violator_pt = lim_pt;
+        r.badge_text = QString("✖ Invalid (%1× < 5×)").arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)));
+        r.summary_text = QString("✖ 2nd-Order Invalid: s_dom = %1 | %2 (%3) is only %4× σd < 5× (%5)%6.")
+            .arg(dom_str)
+            .arg(lim_is_zero ? "Uncanceled CL zero" : "Slow extra pole")
+            .arg(QString::fromStdString(PRECISION.fmtComplex(lim_pt)))
+            .arg(QString::fromStdString(PRECISION.fmt(r.min_ratio)))
+            .arg(lim_is_zero ? "strongly inflates %OS" : "distorts 2nd-order transient")
+            .arg(dip_note);
+    }
+    return r;
+}
+
 class ComplexPlaneCanvas : public QWidget {
     Q_OBJECT
 public:
@@ -43,11 +329,13 @@ public:
     };
     std::vector<SpecIntersection> current_intersections;
 
-    // Live Gain K Closed-Loop Pole Tracker
+    // Live Gain K Closed-Loop Pole & Zero Tracker
     bool show_live_k_poles = false;
     double live_k_val = 1.0;
     std::vector<Complex> live_cl_poles;
     std::vector<Complex> live_cl_zeros;
+    bool show_2nd_order_check = false;
+    SecondOrderApproxReport second_order_report;
 
     // Breakaway / Break-In & jw-Axis Crossing Overlays
     bool show_breakaway = true;
@@ -918,6 +1206,84 @@ protected:
                     p.drawText(cpx + QPointF(8, 14), QString("s_CL(%1) [K=%2]")
                         .arg(QString::fromStdString(PRECISION.fmtComplex(cp)))
                         .arg(QString::fromStdString(PRECISION.fmt(live_k_val))));
+                }
+            }
+        }
+
+        // Toggleable 2nd-Order Dominance Overlay (-5*sigma_d Boundary, Dominant Pair Rings, & Dipoles)
+        if (!is_z_plane && show_live_k_poles && show_2nd_order_check &&
+            second_order_report.status != SecondOrderValidity::None)
+        {
+            QColor v_col = (second_order_report.status == SecondOrderValidity::Valid)    ? QColor("#34d399")
+                         : (second_order_report.status == SecondOrderValidity::Marginal) ? QColor("#f59e0b")
+                                                                                         : QColor("#ff5f56");
+
+            // 1. Canceled Pole-Zero Dipole Links (≈ dipole)
+            p.setFont(QFont("Monospace", 8, QFont::Bold));
+            for (const auto& [dp, dz] : second_order_report.dipoles) {
+                QPointF p_px = toPx(dp);
+                QPointF z_px = toPx(dz);
+                QColor dip_col(148, 163, 184, 190);
+                p.setPen(QPen(dip_col, 1.4, Qt::DotLine));
+                p.setBrush(Qt::NoBrush);
+                p.drawLine(p_px, z_px);
+                QPointF mid = 0.5 * (p_px + z_px);
+                double rad = std::max(8.5, 0.5 * std::hypot(p_px.x() - z_px.x(), p_px.y() - z_px.y()) + 5.0);
+                p.drawEllipse(mid, rad, rad);
+                if (dp.imag() >= -1e-4) {
+                    p.setPen(dip_col);
+                    p.drawText(mid + QPointF(rad + 4.0, -4.0), "≈ dipole");
+                }
+            }
+
+            // 2. -5*sigma_d Vertical Boundary + Subtle Negligible-Region Tint + Dominant Pair Halos
+            if (second_order_report.has_dom_pair && second_order_report.sigma_d > 1e-9) {
+                double sigma_5 = -5.0 * second_order_report.sigma_d;
+                double x5_px = toPx({sigma_5, 0.0}).x();
+
+                double shade_w = std::clamp(x5_px, 0.0, static_cast<double>(width()));
+                if (shade_w > 1.0) {
+                    QColor tint = v_col;
+                    tint.setAlpha(16);
+                    p.fillRect(QRectF(0.0, 0.0, shade_w, static_cast<double>(height())), tint);
+                }
+
+                if (x5_px >= -2.0 && x5_px <= width() + 2.0) {
+                    p.setPen(QPen(v_col, 1.7, Qt::DashDotLine));
+                    p.drawLine(QPointF(x5_px, 0.0), QPointF(x5_px, static_cast<double>(height())));
+                }
+
+                // Header badge anchored near -5*sigma_d (clamped inside viewport so it's always readable)
+                QString tag = QString("← −5σd = %1  [%2]")
+                    .arg(QString::fromStdString(PRECISION.fmt(sigma_5)))
+                    .arg(second_order_report.badge_text);
+                QFontMetrics fm(p.font());
+                double tw = fm.horizontalAdvance(tag) + 12.0;
+                double bx = std::clamp(x5_px - tw - 6.0, 8.0, std::max(8.0, static_cast<double>(width()) - tw - 8.0));
+                QRectF box(bx, 34.0, tw, 19.0);
+                QColor box_bg(Theme::BG_PANEL);
+                box_bg.setAlpha(232);
+                p.setBrush(box_bg);
+                p.setPen(QPen(v_col, 1.2));
+                p.drawRoundedRect(box, 3.5, 3.5);
+                p.setPen(v_col);
+                p.drawText(box, Qt::AlignCenter, tag);
+
+                // Dominant Pole Pair Rings
+                p.setBrush(Qt::NoBrush);
+                p.setPen(QPen(v_col, 1.8));
+                p.drawEllipse(toPx(second_order_report.dom_pole), 9.5, 9.5);
+                if (second_order_report.omega_d > 1e-4) {
+                    p.drawEllipse(toPx(std::conj(second_order_report.dom_pole)), 9.5, 9.5);
+                }
+
+                // Highlight Limiting / Violating Pole or Zero (when Marginal or Invalid)
+                if (second_order_report.has_violator) {
+                    p.setPen(QPen(v_col, 2.0, Qt::DashLine));
+                    p.drawEllipse(toPx(second_order_report.violator_pt), 10.5, 10.5);
+                    if (std::abs(second_order_report.violator_pt.imag()) > 1e-4) {
+                        p.drawEllipse(toPx(std::conj(second_order_report.violator_pt)), 10.5, 10.5);
+                    }
                 }
             }
         }

@@ -51,6 +51,9 @@ public:
 
     CompensatorConfigCard* comp_card = nullptr;
 
+    QCheckBox* chk_2nd_order = nullptr;
+    QLabel* second_order_lbl = nullptr;
+
     RootLocusTab(SharedSystemModel* m, std::function<void(double)> send_cb, QWidget* parent = nullptr)
         : QWidget(parent), model(m), onSendGainToPid(std::move(send_cb))
     {
@@ -84,9 +87,9 @@ public:
         pgrid->addWidget(dl, 0, 2); pgrid->addWidget(den_edit, 0, 3);
         poly_l->addLayout(pgrid);
 
-        // poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
-        // poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
-        // poly_l->addWidget(poly_status_lbl);
+        poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
+        poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
+        poly_l->addWidget(poly_status_lbl);
 
         // Editable G(s) Poles (×) & G(s) Zeros (○) Tables directly under G(s) Num/Den
         auto* pz_row = new QHBoxLayout();
@@ -209,7 +212,12 @@ public:
         spec_l->addLayout(k_row);
 
         auto* d_row = new QHBoxLayout();
+        chk_2nd_order = new QCheckBox("2nd-Ord Check");
+        chk_2nd_order->setChecked(false);
+        chk_2nd_order->setToolTip("Toggle 2nd-Order Dominance Overlay (σd Boundary, Dominant Pair Rings, & Dipoles)");
+        chk_2nd_order->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 10px;").arg(Theme::ACCENT_ASYMP));
         auto* rl_params_btn = makeActionBtn("Design Parameters...", Theme::ACCENT_ZERO);
+        d_row->addWidget(chk_2nd_order);
         d_row->addWidget(rl_params_btn);
         d_row->addStretch();
         spec_l->addLayout(d_row);
@@ -218,6 +226,11 @@ public:
         live_k_poles_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-size: 10px; border: none;");
         live_k_poles_lbl->setWordWrap(true);
         spec_l->addWidget(live_k_poles_lbl);
+
+        second_order_lbl = new QLabel("");
+        second_order_lbl->setWordWrap(true);
+        second_order_lbl->setVisible(false);
+        spec_l->addWidget(second_order_lbl);
 
         left_v->addWidget(spec_card);
 
@@ -481,6 +494,11 @@ public:
             chk_live_k->setChecked(true);
             updating_ui = false;
             evaluateCurrent(false);
+        });
+
+        connect(chk_2nd_order, &QCheckBox::toggled, this, [this](bool v) {
+            second_order_lbl->setVisible(v);
+            if (!updating_ui) evaluateCurrent(false);
         });
 
         connect(locus_param_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
@@ -851,6 +869,42 @@ public:
             canvas->live_cl_poles.clear();
             canvas->live_cl_zeros.clear();
             live_k_poles_lbl->setText("Enable Ts, Tp, ζ to view RL intersections (K, ωn) or click Design Parameters.");
+        }
+
+        // Sync Toggleable 2nd-Order Approximation Check
+        bool want_2nd_check = chk_2nd_order && chk_2nd_order->isChecked();
+        canvas->show_2nd_order_check = want_2nd_check && canvas->show_live_k_poles;
+        if (second_order_lbl) {
+            second_order_lbl->setVisible(want_2nd_check);
+            if (want_2nd_check) {
+                if (canvas->show_live_k_poles) {
+                    canvas->second_order_report = analyzeSecondOrderApprox(canvas->live_cl_poles, canvas->live_cl_zeros);
+                    const auto& rep = canvas->second_order_report;
+                    QString bg = (rep.status == SecondOrderValidity::Valid)    ? Theme::BANNER_OK_BG
+                               : (rep.status == SecondOrderValidity::Marginal) ? Theme::BANNER_WARN_BG
+                                                                               : Theme::BANNER_ERR_BG;
+                    QString bd = (rep.status == SecondOrderValidity::Valid)    ? Theme::BANNER_OK_BD
+                               : (rep.status == SecondOrderValidity::Marginal) ? Theme::BANNER_WARN_BD
+                                                                               : Theme::BANNER_ERR_BD;
+                    QString fg = (rep.status == SecondOrderValidity::Valid)    ? Theme::BANNER_OK_FG
+                               : (rep.status == SecondOrderValidity::Marginal) ? Theme::BANNER_WARN_FG
+                                                                               : Theme::BANNER_ERR_FG;
+                    second_order_lbl->setStyleSheet(QString(
+                        "background-color: %1; color: %2; border: 1px solid %3; "
+                        "border-radius: 4px; padding: 3px 6px; font-family: Monospace; font-size: 10px; font-weight: bold;")
+                        .arg(bg, fg, bd));
+                    second_order_lbl->setText(rep.summary_text);
+                } else {
+                    canvas->second_order_report = {};
+                    second_order_lbl->setStyleSheet(QString(
+                        "background-color: %1; color: %2; border: 1px solid %3; "
+                        "border-radius: 4px; padding: 3px 6px; font-family: Monospace; font-size: 10px;")
+                        .arg(Theme::BG_INPUT, Theme::TEXT_SECONDARY, Theme::BORDER_INPUT));
+                    second_order_lbl->setText("ℹ Check 'Vary Gain K' above to evaluate 2nd-order dominance and display the −5σd boundary.");
+                }
+            } else {
+                canvas->second_order_report = {};
+            }
         }
 
         canvas->repaint();
