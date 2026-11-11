@@ -543,6 +543,15 @@ private:
             }
             size_t st = Pos;
             while (Pos < Src.size() && (std::isdigit(static_cast<unsigned char>(Src[Pos])) || Src[Pos] == '.')) ++Pos;
+            // Consume scientific notation exponent (e.g. 1e5, 2.5e-6, 1.2e+05) while preserving `2e` as 2 * Euler's e
+            if (Pos < Src.size() && (Src[Pos] == 'e' || Src[Pos] == 'E')) {
+                size_t exp_pos = Pos + 1;
+                if (exp_pos < Src.size() && (Src[exp_pos] == '+' || Src[exp_pos] == '-')) ++exp_pos;
+                if (exp_pos < Src.size() && std::isdigit(static_cast<unsigned char>(Src[exp_pos]))) {
+                    Pos = exp_pos;
+                    while (Pos < Src.size() && std::isdigit(static_cast<unsigned char>(Src[Pos]))) ++Pos;
+                }
+            }
             double v = std::stod(Src.substr(st, Pos - st));
             if (Pos < Src.size() && (Src[Pos] == 'i' || Src[Pos] == 'j')) { ++Pos; return SymRat(Complex(0.0, v)); }
             return SymRat(Complex(v, 0.0));

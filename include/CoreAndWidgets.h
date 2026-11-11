@@ -1,6 +1,8 @@
 #pragma once
 #include "CommonIncludes.h"
 
+#include <QFontDatabase>
+
 // =============================================================================
 // Unified Control Systems, Digital Filter, Block Diagram & Scientific Calc Suite
 // Native C++17 / Qt6 / Eigen3 Complete Implementation (7 Synchronized Tabs)
@@ -303,9 +305,36 @@ struct PrecisionConfig {
         double fval = val.value();
         if (std::isnan(fval)) return "—";
         if (std::isinf(fval)) return (fval > 0) ? (signed_fmt ? "+∞" : "∞") : "-∞";
-        if (std::abs(fval) < 1e-12) fval = 0.0;
+        if (std::abs(fval) < 1e-10) fval = 0.0;
 
         int d = decimalsFor(fval);
+        double av = std::abs(fval);
+
+        // Use compact scientific notation for micro-scale (< 1e-4) or large (>= 1e5) values
+        if (av > 0.0 && (av < 1e-4 || av >= 1e5)) {
+            std::ostringstream s_exp;
+            if (signed_fmt && fval >= 0.0) s_exp << "+";
+            s_exp << std::scientific << std::setprecision(std::max(2, d)) << fval;
+            std::string es = s_exp.str();
+            if (strip_zeros || omit_trailing_zeros) {
+                auto e_pos = es.find('e');
+                if (e_pos != std::string::npos && es.find('.') < e_pos) {
+                    std::string mant = es.substr(0, e_pos);
+                    std::string exp_part = es.substr(e_pos);
+                    while (!mant.empty() && mant.back() == '0') mant.pop_back();
+                    if (!mant.empty() && mant.back() == '.') mant.pop_back();
+                    es = mant + exp_part;
+                }
+            }
+            return es;
+        }
+
+        // Expand decimal places for small sub-unity values (1e-4 <= |x| < 1) so leading zeros don't eat all sig figs
+        if (av >= 1e-4 && av < 1.0) {
+            int lead_zeros = static_cast<int>(std::floor(-std::log10(av)));
+            d = std::max(d, lead_zeros + std::max(d, 3));
+        }
+
         std::ostringstream oss;
         if (signed_fmt && fval >= 0.0) oss << "+";
         oss << std::fixed << std::setprecision(d) << fval;
@@ -325,13 +354,12 @@ struct PrecisionConfig {
 
     std::string fmtComplex(Complex val, bool strip_zeros = false) const {
         if (!std::isfinite(val.real()) || !std::isfinite(val.imag())) return "Divergent";
-        std::string re_s = fmt(val.real(), false, strip_zeros);
-        if (std::abs(val.imag()) < 1e-4) return re_s;
-        std::string im_s = fmt(val.imag(), true, strip_zeros);
-        if (std::abs(val.real()) < 1e-9) {
-            return fmt(val.imag(), false, strip_zeros) + "j";
-        }
-        return re_s + im_s + "j";
+        double re_clean = (std::abs(val.real()) < std::max(1e-9, 1e-6 * std::abs(val.imag()))) ? 0.0 : val.real();
+        double im_clean  = (std::abs(val.imag()) < std::max(1e-6, 1e-6 * std::abs(val.real()))) ? 0.0 : val.imag();
+        std::string re_s = fmt(re_clean, false, strip_zeros);
+        if (im_clean == 0.0) return re_s;
+        if (re_clean == 0.0) return fmt(im_clean, false, strip_zeros) + "j";
+        return re_s + fmt(im_clean, true, strip_zeros) + "j";
     }
 
     std::string summaryLabel() const {
@@ -449,6 +477,13 @@ protected:
         double desc = 4.0;
     };
 
+    struct SafeFontMetrics {
+        double asc;
+        double desc;
+        double axis;
+        double em;
+    };
+
     struct StyledSpan {
         QString text;
         bool italic = false;
@@ -459,17 +494,47 @@ protected:
     MathNode root_node;
     QSize cached_size = QSize(100, 28);
 
-    static QFont makeLatexBaseFont(int pt_size) {
-        QFont f;
-        f.setFamilies({
-            "Latin Modern Math", "Latin Modern Roman", "CMU Serif",
-            "STIX Two Math", "STIXGeneral", "Cambria Math",
-            "Century Schoolbook L", "DejaVu Serif", "Liberation Serif", "Times New Roman", "Serif"
-        });
-        f.setPointSizeF(pt_size);
+    static QFont makeLatexBaseFont(int pt) {
+        static QString chosen_family;
+        if (chosen_family.isEmpty()) {
+            const QStringList installed = QFontDatabase::families();
+            // Avoid both "Cambria Math" and "Cambria" — cambria.ttc on Windows reports ~3.4x WinAscent / ~2.4x WinDescent!
+            const QStringList candidates = {
+                "Latin Modern Roman", "CMU Serif", "STIX Two Text",
+                "Palatino Linotype", "Times New Roman",
+                "Liberation Serif", "DejaVu Serif", "Georgia"
+            };
+            for (const auto& c : candidates) {
+                if (installed.contains(c, Qt::CaseInsensitive)) {
+                    chosen_family = c;
+                    break;
+                }
+            }
+        }
+        QFont f = chosen_family.isEmpty() ? QFont("Serif", pt) : QFont(chosen_family, pt);
+        f.setPointSizeF(pt);
         f.setWeight(QFont::Normal);
         f.setStyleHint(QFont::Times, QFont::PreferAntialias);
         return f;
+    }
+
+    static SafeFontMetrics safeMetrics(const QFontMetricsF& fm) {
+        double em = std::max(6.0, static_cast<double>(fm.horizontalAdvance(QStringLiteral("M"))));
+        double cap = fm.capHeight();
+        if (cap <= 2.0) {
+            cap = fm.tightBoundingRect(QStringLiteral("H")).height();
+        }
+        if (cap <= 2.0) {
+            cap = em * 0.72;
+        }
+        // Clamp inflated Windows OS/2 WinAscent/WinDescent bounds to real typographic proportions
+        double asc  = std::min(static_cast<double>(fm.ascent()),  cap * 1.32);
+        double desc = std::min(static_cast<double>(fm.descent()), cap * 0.40);
+        QRectF plus_r = fm.tightBoundingRect(QStringLiteral("+"));
+        double axis = (!plus_r.isEmpty())
+            ? std::clamp(static_cast<double>(-plus_r.center().y()), cap * 0.25, cap * 0.55)
+            : (asc * 0.34);
+        return {asc, desc, axis, em};
     }
 
     static std::vector<StyledSpan> tokenizeMathText(const QString& s, double em_px) {
@@ -715,19 +780,20 @@ protected:
 
     NodeMetrics measureNode(const MathNode& n, const QFont& f) const {
         QFontMetricsF fm(f);
+        const auto sm_f = safeMetrics(fm);
         switch (n.type) {
             case MathNode::TEXT: {
                 QFont f_it = f; f_it.setItalic(true);
                 QFontMetricsF fm_it(f_it);
                 double w = 0.0;
-                auto spans = tokenizeMathText(n.text, fm.height());
+                auto spans = tokenizeMathText(n.text, sm_f.em);
                 for (const auto& sp : spans) {
                     w += sp.pre_pad + (sp.italic ? fm_it.horizontalAdvance(sp.text) : fm.horizontalAdvance(sp.text)) + sp.post_pad;
                 }
-                return {w, fm.ascent(), fm.descent()};
+                return {w, sm_f.asc, sm_f.desc};
             }
             case MathNode::SEQ: {
-                double w = 0.0, asc = fm.ascent(), desc = fm.descent();
+                double w = 0.0, asc = sm_f.asc, desc = sm_f.desc;
                 for (const auto& c : n.children) {
                     auto m = measureNode(c, f);
                     w += m.w;
@@ -741,10 +807,9 @@ protected:
                 auto nm = measureNode(n.children[0], sf);
                 auto dm = measureNode(n.children[1], sf);
                 double w = std::max(nm.w, dm.w) + 12.0;
-                double axis = fm.ascent() * 0.34;
-                double gap = 3.5;
-                double asc = axis + nm.asc + nm.desc + gap;
-                double desc = std::max(0.0, (dm.asc + dm.desc + gap) - axis);
+                double gap = 3.0;
+                double asc = sm_f.axis + nm.asc + nm.desc + gap;
+                double desc = std::max(0.0, (dm.asc + dm.desc + gap) - sm_f.axis);
                 return {w, asc, desc};
             }
             case MathNode::SQRT: {
@@ -754,7 +819,7 @@ protected:
             case MathNode::SUP: {
                 auto bm = measureNode(n.children[0], f);
                 auto sm = measureNode(n.children[1], shrinkFont(f, 0.72));
-                return {bm.w + sm.w + 1.5, std::max(bm.asc, bm.asc * 0.52 + sm.asc + sm.desc), bm.desc};
+                return {bm.w + sm.w + 1.5, std::max(bm.asc, bm.asc * 0.50 + sm.asc + sm.desc), bm.desc};
             }
             case MathNode::SUB: {
                 auto bm = measureNode(n.children[0], f);
@@ -767,7 +832,7 @@ protected:
                 auto supm = measureNode(n.children[1], sf);
                 auto subm = measureNode(n.children[2], sf);
                 return {bm.w + std::max(supm.w, subm.w) + 2.0,
-                        std::max(bm.asc, bm.asc * 0.52 + supm.asc + supm.desc),
+                        std::max(bm.asc, bm.asc * 0.50 + supm.asc + supm.desc),
                         std::max(bm.desc, bm.desc * 0.35 + subm.asc + subm.desc)};
             }
         }
@@ -776,12 +841,13 @@ protected:
 
     double drawNode(QPainter& p, const MathNode& n, double x, double y_base, const QFont& f) const {
         QFontMetricsF fm(f);
+        const auto sm_f = safeMetrics(fm);
         switch (n.type) {
             case MathNode::TEXT: {
                 QFont f_it = f; f_it.setItalic(true);
                 QFontMetricsF fm_it(f_it);
                 double cur_x = x;
-                auto spans = tokenizeMathText(n.text, fm.height());
+                auto spans = tokenizeMathText(n.text, sm_f.em);
                 for (const auto& sp : spans) {
                     cur_x += sp.pre_pad;
                     p.setFont(sp.italic ? f_it : f);
@@ -800,8 +866,8 @@ protected:
                 auto nm = measureNode(n.children[0], sf);
                 auto dm = measureNode(n.children[1], sf);
                 double w = std::max(nm.w, dm.w) + 12.0;
-                double y_bar = y_base - fm.ascent() * 0.34;
-                double gap = 3.5;
+                double y_bar = y_base - sm_f.axis;
+                double gap = 3.0;
                 p.save();
                 p.setPen(QPen(fg_color, 1.1));
                 p.drawLine(QPointF(x + 2.0, y_bar), QPointF(x + w - 2.0, y_bar));
@@ -1216,6 +1282,15 @@ private:
         if (std::isdigit(static_cast<unsigned char>(src[pos])) || src[pos] == '.') {
             size_t st = pos;
             while (pos < src.size() && (std::isdigit(static_cast<unsigned char>(src[pos])) || src[pos] == '.')) ++pos;
+            // Consume scientific notation exponent (e.g. 1e5, 1.25e+05, 2.5e-05)
+            if (pos < src.size() && (src[pos] == 'e' || src[pos] == 'E')) {
+                size_t exp_pos = pos + 1;
+                if (exp_pos < src.size() && (src[exp_pos] == '+' || src[exp_pos] == '-')) ++exp_pos;
+                if (exp_pos < src.size() && std::isdigit(static_cast<unsigned char>(src[exp_pos]))) {
+                    pos = exp_pos;
+                    while (pos < src.size() && std::isdigit(static_cast<unsigned char>(src[pos]))) ++pos;
+                }
+            }
             double v = std::stod(src.substr(st, pos - st));
             if (pos < src.size() && (src[pos] == 'i' || src[pos] == 'j')) { ++pos; return {Complex(0.0, v)}; }
             return {Complex(v, 0.0)};
@@ -1918,7 +1993,13 @@ public:
         };
     }
 
-    static std::vector<Complex> simulateTF(Poly num, Poly den, const std::vector<double>& t, const std::vector<double>& r, const std::string& sig_type, double in_mag) {
+    static std::vector<Complex> simulateTF(
+        Poly num, Poly den,
+        const std::vector<double>& t,
+        const std::vector<double>& r,
+        const std::string& sig_type,
+        double in_mag)
+    {
         num = polyTrim(num);
         den = polyTrim(den);
         int excess = static_cast<int>(num.size()) - static_cast<int>(den.size());
@@ -1942,7 +2023,7 @@ public:
 
         if (n == 0) {
             if (sig_type == "Impulse") {
-                double dt0 = (n_pts > 1) ? (t[1] - t[0]) : 1.0;
+                double dt0 = (n_pts > 1) ? std::max(1e-12, t[1] - t[0]) : 1.0;
                 y[0] = (b0 * in_mag) / dt0;
                 return y;
             }
@@ -1960,32 +2041,57 @@ public:
         Eigen::RowVectorXcd C(n);
         for (int i = 0; i < n; ++i) C(i) = num_pad[n - i] - b0 * den[n - i];
 
-        double dt = (n_pts > 1) ? (t[1] - t[0]) : 0.01;
         Eigen::VectorXcd x = Eigen::VectorXcd::Zero(n);
         if (sig_type == "Impulse") x = B * Complex(in_mag, 0.0);
 
-        int sub_steps = 4;
-        double h = dt / double(sub_steps);
+        double max_pole_est = 1.0;
+        for (int i = 1; i <= n; ++i) {
+            max_pole_est = std::max(max_pole_est, 2.0 * std::pow(std::abs(den[i]), 1.0 / double(i)));
+        }
 
         for (size_t k = 0; k < n_pts; ++k) {
             double u_cur = (sig_type == "Impulse") ? 0.0 : r[k];
             y[k] = C.dot(x) + b0 * u_cur;
             if (k + 1 < n_pts) {
-                double u_next = (sig_type == "Impulse") ? 0.0 : r[k + 1];
-                for (int s = 0; s < sub_steps; ++s) {
-                    double f0 = double(s) / double(sub_steps);
-                    double fm = (double(s) + 0.5) / double(sub_steps);
-                    double f1 = double(s + 1) / double(sub_steps);
-                    double u0 = u_cur + f0 * (u_next - u_cur);
-                    double um = u_cur + fm * (u_next - u_cur);
-                    double u1 = u_cur + f1 * (u_next - u_cur);
+                double dt_k = std::max(0.0, t[k + 1] - t[k]);
+                if (dt_k <= 0.0) continue;
 
-                    Eigen::VectorXcd k1 = A * x + B * u0;
-                    Eigen::VectorXcd k2 = A * (x + 0.5 * h * k1) + B * um;
-                    Eigen::VectorXcd k3 = A * (x + 0.5 * h * k2) + B * um;
-                    Eigen::VectorXcd k4 = A * (x + h * k3) + B * u1;
-                    x += (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+                double u_next = (sig_type == "Impulse") ? 0.0 : r[k + 1];
+                double req_steps = std::ceil((dt_k * max_pole_est) / 0.15);
+
+                if (req_steps <= 2000.0) {
+                    int sub_steps = std::max(2, static_cast<int>(req_steps));
+                    double h = dt_k / double(sub_steps);
+                    for (int s = 0; s < sub_steps; ++s) {
+                        double f0 = double(s) / double(sub_steps);
+                        double fm = (double(s) + 0.5) / double(sub_steps);
+                        double f1 = double(s + 1) / double(sub_steps);
+                        double u0 = u_cur + f0 * (u_next - u_cur);
+                        double um = u_cur + fm * (u_next - u_cur);
+                        double u1 = u_cur + f1 * (u_next - u_cur);
+
+                        Eigen::VectorXcd k1 = A * x + B * u0;
+                        Eigen::VectorXcd k2 = A * (x + 0.5 * h * k1) + B * um;
+                        Eigen::VectorXcd k3 = A * (x + 0.5 * h * k2) + B * um;
+                        Eigen::VectorXcd k4 = A * (x + h * k3) + B * u1;
+                        x += (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+                    }
+                } else {
+                    // Unconditionally A-stable Crank-Nicolson (Tustin) step for ultra-stiff intervals
+                    int sub_steps = 16;
+                    double h = dt_k / double(sub_steps);
+                    Eigen::MatrixXcd I = Eigen::MatrixXcd::Identity(n, n);
+                    Eigen::PartialPivLU<Eigen::MatrixXcd> lu(I - 0.5 * h * A);
+                    Eigen::MatrixXcd M_rhs = I + 0.5 * h * A;
+                    for (int s = 0; s < sub_steps; ++s) {
+                        double f0 = double(s) / double(sub_steps);
+                        double f1 = double(s + 1) / double(sub_steps);
+                        double u0 = u_cur + f0 * (u_next - u_cur);
+                        double u1 = u_cur + f1 * (u_next - u_cur);
+                        x = lu.solve(M_rhs * x + (0.5 * h * (u0 + u1)) * B);
+                    }
                 }
+
                 double max_norm = x.lpNorm<Eigen::Infinity>();
                 if (!std::isfinite(max_norm)) {
                     for (size_t j = k + 1; j < n_pts; ++j) y[j] = y[k];
@@ -1999,17 +2105,8 @@ public:
 
     static SimulationResult evaluate(const SimulationConfig& cfg) {
         SimulationResult res;
-        double t_max = std::max(cfg.t_max, 0.1);
-        int n_pts = std::max(cfg.num_points, 200);
-        res.t.resize(n_pts);
-        res.r.resize(n_pts);
-        for (int i = 0; i < n_pts; ++i) {
-            res.t[i] = t_max * double(i) / double(n_pts - 1);
-            if (cfg.signal_type == "Step") res.r[i] = cfg.input_magnitude;
-            else if (cfg.signal_type == "Impulse") res.r[i] = 0.0;
-            else if (cfg.signal_type == "Ramp") res.r[i] = cfg.input_magnitude * res.t[i];
-            else res.r[i] = cfg.input_magnitude * std::sin(cfg.sine_freq_rad * res.t[i]);
-        }
+        double t_max = std::max(cfg.t_max, 1e-6);
+        int n_base = std::max(cfg.num_points, 200);
 
         auto [num_g, den_g] = buildPlantPolynomials(cfg.poles, cfg.zeros, cfg.plant_gain);
         
@@ -2051,24 +2148,110 @@ public:
         res.ol_poles = cfg.poles;
         res.ol_zeros = cfg.zeros;
 
+        // Build multi-scale time grid: uniform [0, t_max] + dense sub-grids over fast pole transients
+        std::vector<double> t_grid;
+        t_grid.reserve(n_base + 1024);
+        for (int i = 0; i < n_base; ++i) {
+            t_grid.push_back(t_max * double(i) / double(n_base - 1));
+        }
+
+        std::vector<double> cand_wins;
+        auto addPoleWindows = [&](const std::vector<Complex>& plist) {
+            for (const auto& p : plist) {
+                double wp = std::abs(p);
+                if (wp > 1e-4) {
+                    double w_osc = (12.0 * PI) / wp; // ~6 cycles to resolve Tr, Tp, & %OS
+                    if (w_osc < 0.45 * t_max) cand_wins.push_back(w_osc);
+                }
+                if (p.real() < -1e-4) {
+                    double w_dec = 7.0 / std::abs(p.real()); // 7 time constants to resolve Ts
+                    if (w_dec < 0.45 * t_max) cand_wins.push_back(w_dec);
+                }
+            }
+        };
+        addPoleWindows(res.cl_poles);
+        addPoleWindows(res.ol_poles);
+        if (cfg.signal_type == "Sine" && cfg.sine_freq_rad > 1e-3) {
+            double w_sin = (12.0 * PI) / cfg.sine_freq_rad;
+            if (w_sin < 0.45 * t_max) cand_wins.push_back(w_sin);
+        }
+
+        std::sort(cand_wins.begin(), cand_wins.end());
+        std::vector<double> merged_wins;
+        for (double w : cand_wins) {
+            if (w <= 1e-9) continue;
+            if (merged_wins.empty() || w > 1.8 * merged_wins.back()) {
+                merged_wins.push_back(w);
+                if (merged_wins.size() >= 4) break;
+            }
+        }
+        for (double w : merged_wins) {
+            const int n_sub = 320;
+            for (int i = 1; i < n_sub; ++i) {
+                t_grid.push_back(w * double(i) / double(n_sub - 1));
+            }
+        }
+
+        std::sort(t_grid.begin(), t_grid.end());
+        res.t.clear();
+        res.t.reserve(t_grid.size());
+        double min_dt_sep = t_max * 1e-11;
+        for (double tv : t_grid) {
+            if (res.t.empty() || (tv - res.t.back()) > min_dt_sep) {
+                res.t.push_back(tv);
+            }
+        }
+        res.t.back() = t_max;
+
+        int n_pts = static_cast<int>(res.t.size());
+        res.r.resize(n_pts);
+        for (int i = 0; i < n_pts; ++i) {
+            if (cfg.signal_type == "Step") res.r[i] = cfg.input_magnitude;
+            else if (cfg.signal_type == "Impulse") res.r[i] = 0.0;
+            else if (cfg.signal_type == "Ramp") res.r[i] = cfg.input_magnitude * res.t[i];
+            else res.r[i] = cfg.input_magnitude * std::sin(cfg.sine_freq_rad * res.t[i]);
+        }
+
         res.y_closed  = simulateTF(num_cl, den_cl, res.t, res.r, cfg.signal_type, cfg.input_magnitude);
         res.y_open    = simulateTF(num_g, den_g, res.t, res.r, cfg.signal_type, cfg.input_magnitude);
         res.u_control = simulateTF(num_u, den_cl, res.t, res.r, cfg.signal_type, cfg.input_magnitude);
 
+        if (!cfg.closed_loop) {
+            for (int i = 0; i < n_pts; ++i) res.u_control[i] = Complex(res.r[i], 0.0);
+        }
+
         res.y_primary = cfg.closed_loop ? res.y_closed : res.y_open;
-        const auto& active_poles = cfg.closed_loop ? res.cl_poles : res.ol_poles;
+        const auto& raw_active_poles = cfg.closed_loop ? res.cl_poles : res.ol_poles;
+        const auto& raw_active_zeros = cfg.closed_loop ? res.cl_zeros : res.ol_zeros;
+
+        // Filter out exact pole-zero cancellations (within 1e-3) for effective dynamic metrics
+        std::vector<Complex> active_poles;
+        std::vector<bool> z_used(raw_active_zeros.size(), false);
+        for (const auto& p : raw_active_poles) {
+            bool cancelled = false;
+            for (size_t zi = 0; zi < raw_active_zeros.size(); ++zi) {
+                if (!z_used[zi] && std::abs(p - raw_active_zeros[zi]) < 1e-3) {
+                    z_used[zi] = true;
+                    cancelled = true;
+                    break;
+                }
+            }
+            if (!cancelled) active_poles.push_back(p);
+        }
 
         auto dom_m = computeDominantSMetrics(active_poles, cfg.deriv_filter_n);
         res.zeta = dom_m.zeta; res.omega_n = dom_m.omega_n; res.omega_d = dom_m.omega_d;
         auto ol_m = computeDominantSMetrics(res.ol_poles, cfg.deriv_filter_n);
         res.ol_zeta = ol_m.zeta; res.ol_omega_n = ol_m.omega_n;
 
-        if (active_poles.empty()) {
+        // Stability must still check all algebraic poles (so unstable RHP cancellations are never hidden!)
+        const auto& stab_poles = raw_active_poles;
+        if (stab_poles.empty()) {
             res.max_real_pole = -std::numeric_limits<double>::infinity();
             res.stability_state = "STABLE";
         } else {
             res.max_real_pole = -1e30;
-            for (const auto& p : active_poles) res.max_real_pole = std::max(res.max_real_pole, p.real());
+            for (const auto& p : stab_poles) res.max_real_pole = std::max(res.max_real_pole, p.real());
             if (res.max_real_pole < -1e-5) res.stability_state = "STABLE";
             else if (res.max_real_pole <= 1e-5) res.stability_state = "MARGINAL";
             else res.stability_state = "UNSTABLE";
@@ -2100,22 +2283,87 @@ public:
         double target_re = res.y_steady.real();
 
         if (res.stability_state == "STABLE" && cfg.signal_type == "Step" && std::abs(target_re) > 1e-6) {
-            int i10 = -1, i90 = -1, last_out_2 = -1, last_out_5 = -1;
+            bool has_10 = false, has_90 = false;
+            double t10 = 0.0, t90 = 0.0;
+            int last_out_2 = -1, last_out_5 = -1;
             double max_norm = -1e30;
             size_t pk_step = 0;
+            double yss_scale = std::max(std::abs(res.y_steady), 1e-9);
+
             for (int i = 0; i < n_pts; ++i) {
                 double yn = res.y_primary[i].real() / target_re;
-                if (i10 < 0 && yn >= 0.10) i10 = i;
-                if (i90 < 0 && yn >= 0.90) i90 = i;
-                if (yn > max_norm) { max_norm = yn; pk_step = i; }
-                double err_b = std::abs(res.y_primary[i] - res.y_steady) / std::max(std::abs(res.y_steady), 1e-9);
+                if (!has_10 && yn >= 0.10) {
+                    if (i == 0) t10 = res.t[0];
+                    else {
+                        double yn0 = res.y_primary[i - 1].real() / target_re;
+                        double frac = (std::abs(yn - yn0) > 1e-15) ? std::clamp((0.10 - yn0) / (yn - yn0), 0.0, 1.0) : 0.0;
+                        t10 = res.t[i - 1] + frac * (res.t[i] - res.t[i - 1]);
+                    }
+                    has_10 = true;
+                }
+                if (!has_90 && yn >= 0.90) {
+                    if (i == 0) t90 = res.t[0];
+                    else {
+                        double yn0 = res.y_primary[i - 1].real() / target_re;
+                        double frac = (std::abs(yn - yn0) > 1e-15) ? std::clamp((0.90 - yn0) / (yn - yn0), 0.0, 1.0) : 0.0;
+                        t90 = res.t[i - 1] + frac * (res.t[i] - res.t[i - 1]);
+                    }
+                    has_90 = true;
+                }
+                if (yn > max_norm) { max_norm = yn; pk_step = static_cast<size_t>(i); }
+
+                double err_b = std::abs(res.y_primary[i] - res.y_steady) / yss_scale;
                 if (err_b > tol_frac) last_out_2 = i;
                 if (err_b > 0.05)     last_out_5 = i;
             }
-            if (i10 >= 0 && i90 >= i10) res.rise_time = std::max(0.0, res.t[i90] - res.t[i10]);
+
+            // 3-point parabolic vertex refinement around pk_step for exact Peak, Tp, & %OS
+            double pk_t = res.t[pk_step];
+            double pk_val = res.y_primary[pk_step].real();
+            if (pk_step > 0 && pk_step + 1 < static_cast<size_t>(n_pts)) {
+                double x1 = res.t[pk_step - 1] - res.t[pk_step];
+                double x3 = res.t[pk_step + 1] - res.t[pk_step];
+                double d1 = (res.y_primary[pk_step - 1].real() / target_re) - max_norm;
+                double d3 = (res.y_primary[pk_step + 1].real() / target_re) - max_norm;
+                double denom = x1 * x3 * (x1 - x3);
+                if (std::abs(denom) > 1e-30) {
+                    double a = (d1 * x3 - d3 * x1) / denom;
+                    double b = (d3 * x1 * x1 - d1 * x3 * x3) / denom;
+                    if (a < -1e-15) {
+                        double xv = std::clamp(-b / (2.0 * a), x1, x3);
+                        double yn_v = max_norm + a * xv * xv + b * xv;
+                        if (yn_v >= max_norm) {
+                            max_norm = yn_v;
+                            pk_t = res.t[pk_step] + xv;
+                            pk_val = max_norm * target_re;
+                        }
+                    }
+                }
+            }
+
+            if (has_10 && has_90 && t90 >= t10) res.rise_time = t90 - t10;
             res.overshoot_pct = std::max(0.0, (max_norm - 1.0) * 100.0);
-            res.peak_time = res.t[pk_step];
-            res.peak_value = res.y_primary[pk_step].real();
+            res.peak_time = pk_t;
+            res.peak_value = pk_val;
+
+            auto interpSettle = [&](int last_idx, double thr) -> std::optional<double> {
+                if (last_idx < 0) return 0.0;
+                if (last_idx >= n_pts - 1) return std::nullopt;
+                double e0 = std::abs(res.y_primary[last_idx] - res.y_steady) / yss_scale;
+                double e1 = std::abs(res.y_primary[last_idx + 1] - res.y_steady) / yss_scale;
+                double frac = (e0 - e1 > 1e-15) ? std::clamp((e0 - thr) / (e0 - e1), 0.0, 1.0) : 1.0;
+                return res.t[last_idx] + frac * (res.t[last_idx + 1] - res.t[last_idx]);
+            };
+            res.settling_time      = interpSettle(last_out_2, tol_frac);
+            res.settling_time_5pct = interpSettle(last_out_5, 0.05);
+        } else if (res.stability_state == "STABLE" && cfg.signal_type == "Impulse") {
+            double pk_abs = std::max(std::abs(res.peak_value), 1e-9);
+            int last_out_2 = -1, last_out_5 = -1;
+            for (int i = 0; i < n_pts; ++i) {
+                double err_b = std::abs(res.y_primary[i].real()) / pk_abs;
+                if (err_b > tol_frac) last_out_2 = i;
+                if (err_b > 0.05)     last_out_5 = i;
+            }
             if (last_out_2 < 0) res.settling_time = 0.0;
             else if (last_out_2 < n_pts - 1) res.settling_time = res.t[last_out_2 + 1];
             if (last_out_5 < 0) res.settling_time_5pct = 0.0;
@@ -2140,9 +2388,17 @@ public:
 
         res.dc_gain_cl = (std::abs(act_den.back()) > 1e-12) ? (act_num.back() / act_den.back()).real() : 0.0;
 
-        if (res.zeta.has_value() && res.omega_n.has_value() && res.omega_n.value() > 1e-9) {
+        if (active_poles.empty()) {
+            res.theo_os_pct = 0.0;
+            res.theo_tr_sec = 0.0;
+            res.theo_ts2_sec = 0.0;
+            res.damping_regime = "Pure Gain (Static)";
+        } else if (res.zeta.has_value() && res.omega_n.has_value() && res.omega_n.value() > 1e-9) {
             double z = res.zeta.value(), wn = res.omega_n.value();
-            res.sigma_d = z * wn;
+            // For overdamped (z > 1), dominant decay rate is the slowest pole |Re(dom_pole)|, not z*wn!
+            res.sigma_d = (z > 1.0 && dom_m.dom_pole.has_value())
+                ? std::abs(dom_m.dom_pole->real())
+                : (z * wn);
             res.time_constant_tau = (res.sigma_d.value() > 1e-9) ? (1.0 / res.sigma_d.value()) : std::numeric_limits<double>::infinity();
             res.theo_ts2_sec = (res.sigma_d.value() > 1e-9) ? (4.0 / res.sigma_d.value()) : std::numeric_limits<double>::infinity();
             res.theo_os_pct = (active_poles.size() == 1) ? 0.0 : niseOsFromZeta(z);
@@ -2161,10 +2417,24 @@ public:
         }
 
         res.cursor_t = std::clamp(cfg.cursor_time, 0.0, t_max);
-        int c_idx = std::clamp(static_cast<int>(std::round((res.cursor_t / t_max) * (n_pts - 1))), 0, n_pts - 1);
-        res.cursor_y = res.y_primary[c_idx];
-        res.cursor_u = res.u_control[c_idx];
-        res.cursor_r = res.r[c_idx];
+        auto it_hi = std::lower_bound(res.t.begin(), res.t.end(), res.cursor_t);
+        if (it_hi == res.t.begin()) {
+            res.cursor_y = res.y_primary.front();
+            res.cursor_u = res.u_control.front();
+            res.cursor_r = res.r.front();
+        } else if (it_hi == res.t.end()) {
+            res.cursor_y = res.y_primary.back();
+            res.cursor_u = res.u_control.back();
+            res.cursor_r = res.r.back();
+        } else {
+            size_t i1 = static_cast<size_t>(std::distance(res.t.begin(), it_hi));
+            size_t i0 = i1 - 1;
+            double dt_seg = res.t[i1] - res.t[i0];
+            double alpha = (dt_seg > 1e-15) ? ((res.cursor_t - res.t[i0]) / dt_seg) : 0.0;
+            res.cursor_y = res.y_primary[i0] + alpha * (res.y_primary[i1] - res.y_primary[i0]);
+            res.cursor_u = res.u_control[i0] + alpha * (res.u_control[i1] - res.u_control[i0]);
+            res.cursor_r = res.r[i0] + alpha * (res.r[i1] - res.r[i0]);
+        }
         res.cursor_abs_err = std::abs(res.cursor_r - res.cursor_y);
         res.cursor_rel_err_pct = (res.cursor_abs_err / abs_mag) * 100.0;
         res.cursor_within_tol = (std::abs(res.cursor_y - res.y_steady) / std::max(std::abs(res.y_steady), 1.0)) <= tol_frac;
@@ -2435,6 +2705,23 @@ public:
                 res.settling_time_sec = double(res.settling_samples.value()) * ts;
             }
             res.overshoot_pct = std::max(0.0, (max_n - 1.0) * 100.0);
+        } else if (res.stability_state == "STABLE" && cfg.signal_type == "Impulse") {
+            double pk_abs = 1e-9;
+            for (int k = 0; k < n_pts; ++k) {
+                double a = std::abs(res.y_primary[k].real());
+                if (a > pk_abs) { pk_abs = a; res.peak_k = k; res.peak_value = res.y_primary[k].real(); }
+            }
+            int last_out = -1;
+            for (int k = 0; k < n_pts; ++k) {
+                if (std::abs(res.y_primary[k].real()) / pk_abs > tol_frac) last_out = k;
+            }
+            if (last_out < 0) {
+                res.settling_samples = 0;
+                res.settling_time_sec = 0.0;
+            } else if (last_out < n_pts - 1) {
+                res.settling_samples = last_out + 1;
+                res.settling_time_sec = double(res.settling_samples.value()) * ts;
+            }
         }
 
         res.cursor_k = std::clamp(cfg.cursor_k, 0, n_pts - 1);

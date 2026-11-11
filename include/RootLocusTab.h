@@ -425,11 +425,11 @@ public:
             if (chk_tp_show && !chk_tp_show->isChecked()) return;
             updating_ui = true;
             if (!is_polar_mode) {
-                tp_v1_edit->setText(QString::number(pt.real(), 'g', 4));
-                tp_v2_edit->setText(QString::number(pt.imag(), 'g', 4));
+                tp_v1_edit->setText(QString::number(pt.real(), 'g', 7));
+                tp_v2_edit->setText(QString::number(pt.imag(), 'g', 7));
             } else {
-                tp_v1_edit->setText(QString::number(std::abs(pt), 'g', 4));
-                tp_v2_edit->setText(QString::number(std::arg(pt) * 180.0 / PI, 'g', 4));
+                tp_v1_edit->setText(QString::number(std::abs(pt), 'g', 7));
+                tp_v2_edit->setText(QString::number(std::arg(pt) * 180.0 / PI, 'g', 7));
             }
             updating_ui = false;
             evaluateCurrent(false);
@@ -540,8 +540,10 @@ public:
                     model->comp_enabled_s = true;
                     model->c_zeros.clear();
                     model->c_poles.clear();
-                    if (comp.has_zero) model->c_zeros.push_back(Complex(-comp.z_c, 0.0));
-                    if (comp.has_pole) model->c_poles.push_back(Complex(-comp.p_c, 0.0));
+                    for (int s = 0; s < std::max(1, comp.stages); ++s) {
+                        if (comp.has_zero) model->c_zeros.push_back(Complex(-comp.z_c, 0.0));
+                        if (comp.has_pole) model->c_poles.push_back(Complex(-comp.p_c, 0.0));
+                    }
                     model->c_gain = comp.k_c;
                     model->c_num_str = formatPolynomialFromRoots(model->c_zeros, "s");
                     model->c_den_str = formatPolynomialFromRoots(model->c_poles, "s");
@@ -795,6 +797,8 @@ public:
 
         canvas->test_point = tp;
         canvas->is_on_rl = on_rl;
+
+        canvas->param_sym = is_pole_sweep ? "a" : "K";
 
         // Sync s-Plane Spec Overlay Lines
         canvas->show_ts_line   = chk_ts_spec->isChecked();

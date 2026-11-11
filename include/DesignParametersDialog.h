@@ -869,6 +869,7 @@ public:
 struct RootLocusCompensatorResult {
     bool valid = false;
     std::string comp_type = "Lead"; // "Lead", "PD", "Lag", "PI"
+    int stages = 1; // 1 = single-stage, 2 = cascaded double lead
     std::string method_name;
     Complex s_target{-2.0, 2.0};
     double angle_def_deg = 0.0;
@@ -1029,6 +1030,8 @@ private:
         }
     }
 
+    QPushButton* comp_apply_btn = nullptr;
+
     QWidget* buildCompensatorDesignPage() {
         auto* page = new QWidget();
         auto* vl = new QVBoxLayout(page);
@@ -1038,17 +1041,18 @@ private:
         // 1. Top Controls Card
         auto* ctrl_card = makeCard();
         auto* cl = new QVBoxLayout(ctrl_card);
-        cl->setContentsMargins(12, 10, 12, 10);
-        cl->setSpacing(8);
+        cl->setContentsMargins(12, 8, 12, 8);
+        cl->setSpacing(6);
 
         auto* row1 = new QHBoxLayout();
         auto* t_lbl = new QLabel("Compensator Type:");
         t_lbl->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_ZERO));
         comp_type_combo = new QComboBox();
         comp_type_combo->addItems({
-            "Lead Compensator   Gc(s) = Kc (s + zc) / (s + pc)   [Δθ > 0°]",
+            "Lead Compensator   Gc(s) = Kc (s + zc) / (s + pc)   [Single Stage, Δθ > 0°]",
+            "2-Stage Double Lead   Gc(s) = Kc ((s + zc) / (s + pc))²   [Large Δθ > 65°]",
             "Ideal PD Compensator   Gc(s) = Kc (s + zc)   [Single Zero]",
-            "Lag Compensator   Gc(s) = Kc (s + zc) / (s + pc)   [Boost Static Error Constant]",
+            "Lag Compensator   Gc(s) = Kc (s + z_lag) / (s + p_lag)   [Boost Error Constant]",
             "Ideal PI Compensator   Gc(s) = Kc (s + zc) / s   [Pole at Origin s = 0]"
         });
         comp_type_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 4px 8px; font-weight: bold; font-size: 11px;")
@@ -1077,10 +1081,10 @@ private:
         sd_lbl->setStyleSheet("color: #facc15; font-weight: bold; font-size: 11px; border:none;");
         auto* re_l = new QLabel("Real (σ):");
         re_l->setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold; border:none;");
-        comp_sd_re_edit = makeDarkEntry(QString::number(model->test_point.real(), 'g', 4), 70);
+        comp_sd_re_edit = makeDarkEntry(QString::number(model->test_point.real(), 'g', 6), 75);
         auto* im_l = new QLabel("Imag (jωd):");
         im_l->setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold; border:none;");
-        comp_sd_im_edit = makeDarkEntry(QString::number(std::abs(model->test_point.imag()) > 1e-4 ? std::abs(model->test_point.imag()) : 2.0, 'g', 4), 70);
+        comp_sd_im_edit = makeDarkEntry(QString::number(std::abs(model->test_point.imag()) > 1e-4 ? std::abs(model->test_point.imag()) : 2.0, 'g', 6), 75);
 
         auto* pull_tp_btn = makeActionBtn("📍 Pull Current Test Point s", Theme::TEXT_PRIMARY, Theme::BG_INPUT);
         auto* pull_spec_btn = makeActionBtn("🎯 Pull from Locked (ζ, ωn)", Theme::ACCENT_ZERO, Theme::BG_INPUT);
@@ -1106,11 +1110,12 @@ private:
         cl->addWidget(comp_def_lbl);
         vl->addWidget(ctrl_card);
 
-        // 2. Synthesized Gc(s) & Step-by-Step Trigonometric Derivation Card
+        // 2. Synthesized Gc(s) & Step-by-Step Trigonometric Derivation Card (Compact Vertical Packing!)
         auto* math_card = makeCard();
+        math_card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
         auto* ml = new QVBoxLayout(math_card);
         ml->setContentsMargins(12, 10, 12, 10);
-        ml->setSpacing(8);
+        ml->setSpacing(6);
 
         auto* gc_hdr = new QLabel("1. SYNTHESIZED COMPENSATOR TRANSFER FUNCTION  Gc(s)  &  REQUIRED LOOP GAIN  Kc");
         gc_hdr->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_PID));
@@ -1126,10 +1131,13 @@ private:
 
         ml->addWidget(gc_hdr);
         ml->addWidget(comp_gc_math_w);
+        ml->addSpacing(6);
         ml->addWidget(st_hdr);
-        ml->addWidget(comp_steps_math_w, 1);
+        ml->addWidget(comp_steps_math_w);
+        ml->addSpacing(6);
         ml->addWidget(comp_verdict_lbl);
-        vl->addWidget(math_card, 1);
+        vl->addWidget(math_card);
+        vl->addStretch(1); // Pushes all spare dialog height below math_card so formulas stay tightly grouped!
 
         // 3. Bottom Action Bar: Apply with Ghost RL Overlay or Restore Uncompensated Plant
         auto* act_card = makeCard();
@@ -1140,29 +1148,29 @@ private:
         ghost_info->setStyleSheet("color: #94a3b8; font-size: 11px; border:none;");
 
         auto* restore_btn = makeActionBtn("↺ Restore Uncompensated Plant", "#f87171", Theme::BG_INPUT);
-        auto* apply_comp_btn = makeActionBtn("✔ Apply Compensator & Pin Ghost RL ➔", "#0b0e14", Theme::ACCENT_PID);
+        comp_apply_btn = makeActionBtn("✔ Apply Compensator & Pin Ghost RL ➔", "#0b0e14", Theme::ACCENT_PID);
 
         al->addWidget(ghost_info, 1);
         al->addWidget(restore_btn);
         al->addSpacing(8);
-        al->addWidget(apply_comp_btn);
+        al->addWidget(comp_apply_btn);
         vl->addWidget(act_card);
 
         // Connections
         connect(comp_type_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int idx) {
-            if (idx == 0) { // Lead
-                comp_method_combo->setEnabled(true);
-                int m_idx = comp_method_combo->currentIndex();
+            if (idx == 0 || idx == 1) { // Single Lead or 2-Stage Double Lead
+                comp_method_combo->setEnabled(idx == 0); // 2-Stage uses optimal Angle Bisector per stage
+                int m_idx = (idx == 0) ? comp_method_combo->currentIndex() : 0;
                 comp_param_lbl->setText("Custom Zero zc (s = -zc):");
-                comp_param_lbl->setVisible(m_idx == 2);
-                comp_param_edit->setVisible(m_idx == 2);
-            } else if (idx == 1) { // Ideal PD
+                comp_param_lbl->setVisible(idx == 0 && m_idx == 2);
+                comp_param_edit->setVisible(idx == 0 && m_idx == 2);
+            } else if (idx == 2) { // Ideal PD
                 comp_method_combo->setEnabled(false);
                 comp_param_lbl->setVisible(false);
                 comp_param_edit->setVisible(false);
-            } else if (idx == 2) { // Lag
+            } else if (idx == 3) { // Lag
                 comp_method_combo->setEnabled(false);
-                comp_param_lbl->setText("Error Boost Ratio β = zc/pc (>1):");
+                comp_param_lbl->setText("Error Boost Ratio β = z_lag/p_lag (>1):");
                 comp_param_edit->setText("5.0");
                 comp_param_lbl->setVisible(true);
                 comp_param_edit->setVisible(true);
@@ -1188,8 +1196,8 @@ private:
         }
 
         connect(pull_tp_btn, &QPushButton::clicked, this, [this]() {
-            comp_sd_re_edit->setText(QString::number(model->test_point.real(), 'g', 4));
-            comp_sd_im_edit->setText(QString::number(std::abs(model->test_point.imag()), 'g', 4));
+            comp_sd_re_edit->setText(QString::number(model->test_point.real(), 'g', 6));
+            comp_sd_im_edit->setText(QString::number(std::abs(model->test_point.imag()), 'g', 6));
             refreshCompensatorEvaluation();
         });
 
@@ -1197,12 +1205,12 @@ private:
             refreshEvaluation();
             double sig = last_analysis.solved["sigma_d"];
             double wd  = last_analysis.solved["omega_d"];
-            comp_sd_re_edit->setText(QString::number(- std::abs(sig), 'g', 4));
-            comp_sd_im_edit->setText(QString::number(std::abs(wd), 'g', 4));
+            comp_sd_re_edit->setText(QString::number(-std::abs(sig), 'g', 6));
+            comp_sd_im_edit->setText(QString::number(std::abs(wd), 'g', 6));
             refreshCompensatorEvaluation();
         });
 
-        connect(apply_comp_btn, &QPushButton::clicked, this, [this]() {
+        connect(comp_apply_btn, &QPushButton::clicked, this, [this]() {
             refreshCompensatorEvaluation();
             if (last_comp_res.valid && onApplyCompensator) {
                 onApplyCompensator(last_comp_res);
@@ -1228,7 +1236,7 @@ private:
         auto loop_poles = model->uncompensatedLoopPolesS();
         auto loop_zeros = model->uncompensatedLoopZerosS();
         auto ev = evaluateTransferFunction(loop_poles, loop_zeros, sd, 1.0);
-        double def_deg = computeAngleDeficiency(ev.angle_deg); // in [-180, 180]
+        double def_deg = computeAngleDeficiency(ev.angle_deg); // signed in [-180, 180]
 
         comp_def_lbl->setText(QString(
             "Uncompensated Evaluation @ s_d = %1 + j%2 :   ∠G(s_d)H(s_d) = %3°   •   |G(s_d)H(s_d)| = %4   •   Angle Deficiency Δθ = %5°")
@@ -1241,130 +1249,249 @@ private:
         RootLocusCompensatorResult res;
         res.s_target = sd;
         res.angle_def_deg = def_deg;
+        res.valid = true;
+        std::string err_reason;
+        std::string warn_note;
+
+        if (sig >= -1e-5) {
+            res.valid = false;
+            err_reason = "✖ Target pole s_d must lie strictly in the Left-Half Plane (Real σ < 0).";
+        }
 
         int type_idx = comp_type_combo->currentIndex();
         int meth_idx = comp_method_combo->currentIndex();
         double param_v = std::max(1e-4, std::abs(parseNumericInput(comp_param_edit->text().toStdString(), 2.0)));
 
-        double phi_deg = std::clamp(std::abs(def_deg), 1.0, 85.0);
-        double phi_rad = phi_deg * PI / 180.0;
+        double psi_rad = std::atan2(wd, sig); // in (0, pi) when wd > 0
+        double psi_deg = psi_rad * 180.0 / PI;
 
-        if (type_idx == 0) {
-            // LEAD COMPENSATOR
-            res.comp_type = "Lead";
-            res.has_zero = true;
-            res.has_pole = true;
-            if (meth_idx == 0) {
-                // Angle Bisector Method
-                res.method_name = "Angle Bisector Method";
-                // Angle of s_d from positive real axis ispsi in (0, pi)
-                double psi = std::atan2(wd, sig); // rad, typically in (pi/2, pi) for LHP
-                double bisector = 0.5 * (PI + psi);
-                double ang_z = bisector - 0.5 * phi_rad;
-                double ang_p = bisector + 0.5 * phi_rad;
-                // From geometry: -z_c = sig + wd / tan(pi - ang_z) => z_c = -sig + wd * cot(pi - ang_z)
-                res.z_c = std::max(1e-3, -sig - wd / std::tan(ang_z));
-                res.p_c = std::max(res.z_c + 1e-3, -sig - wd / std::tan(ang_p));
-                res.steps_latex =
-                    "\\phi_{\\mathrm{lead}} = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ, \\quad "
-                    "\\psi = \\angle s_d = " + PRECISION.fmt(psi * 180.0 / PI) + "^\\circ \\implies "
-                    "z_c = " + PRECISION.fmt(res.z_c) + ", \\; p_c = " + PRECISION.fmt(res.p_c);
-            } else if (meth_idx == 1) {
-                // Pole-Cancellation Method: pick slowest negative real pole (excluding s=0)
-                res.method_name = "Pole-Cancellation Method";
-                double p_cancel = -sig;
-                for (const auto& p : model->poles) {
-                    if (std::abs(p.imag()) < 1e-5 && p.real() < -1e-4) {
-                        if (std::abs(p.real()) < p_cancel || p_cancel == -sig) p_cancel = -p.real();
+        if (res.valid && (type_idx == 0 || type_idx == 1 || type_idx == 2)) {
+            // Lead / 2-Stage Lead / Ideal PD all require positive phase lead (def_deg > 0) and wd > 0
+            if (wd < 1e-4) {
+                res.valid = false;
+                err_reason = "✖ Lead / PD synthesis requires a complex target pole (Imag ω_d > 0).";
+            } else if (def_deg <= 0.25) {
+                res.valid = false;
+                err_reason = (std::abs(def_deg) <= 0.25)
+                    ? "ℹ Target s_d already lies on the uncompensated Root Locus (Δθ ≈ 0°) — pure gain K suffices!"
+                    : "✖ Negative Angle Deficiency (Δθ = " + PRECISION.fmt(def_deg, true) +
+                      "° < 0°): phase lag is required here, not phase lead.";
+            }
+        }
+
+        if (res.valid) {
+            if (type_idx == 0) {
+                // 1-STAGE LEAD COMPENSATOR
+                res.comp_type = "Lead";
+                res.stages = 1;
+                res.has_zero = true;
+                res.has_pole = true;
+                double phi_deg = def_deg;
+                double phi_rad = phi_deg * PI / 180.0;
+
+                if (phi_deg > 70.0 && phi_deg < psi_deg - 0.5) {
+                    warn_note = "  [⚠ Δθ > 70° requires high pole ratio α; consider 2-Stage Double Lead]";
+                }
+
+                if (meth_idx == 0) {
+                    res.method_name = "Angle Bisector Method";
+                    if (phi_deg >= psi_deg - 0.5) {
+                        res.valid = false;
+                        err_reason = "✖ Infeasible for 1-Stage LHP Lead: Δθ = " + PRECISION.fmt(phi_deg) +
+                                     "° ≥ ψ = " + PRECISION.fmt(psi_deg) +
+                                     "° (any LHP zero/pole pair has max phase < ψ, else z_c is forced into the RHP!). "
+                                     "Select '2-Stage Double Lead' above.";
+                    } else {
+                        double theta_p = 0.5 * (psi_rad - phi_rad);
+                        double theta_z = 0.5 * (psi_rad + phi_rad);
+                        res.z_c = -sig + wd / std::tan(theta_z);
+                        res.p_c = -sig + wd / std::tan(theta_p);
+                        res.steps_latex =
+                            "\\phi_{\\mathrm{lead}} = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ, \\quad "
+                            "ψ = \\angle s_d = " + PRECISION.fmt(psi_deg) + "^\\circ ⟹ "
+                            "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\; "
+                            "\\theta_p = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ ⟹ "
+                            "z_c = " + PRECISION.fmt(res.z_c) + ", \\; p_c = " + PRECISION.fmt(res.p_c);
+                    }
+                } else if (meth_idx == 1) {
+                    res.method_name = "Pole-Cancellation Method";
+                    double p_cancel = -1.0;
+                    for (const auto& p : model->poles) {
+                        if (std::abs(p.imag()) < 1e-5 && p.real() < -1e-4) {
+                            if (p_cancel < 0.0 || std::abs(p.real()) < p_cancel) p_cancel = -p.real();
+                        }
+                    }
+                    if (p_cancel < 0.0) {
+                        res.valid = false;
+                        err_reason = "✖ Pole-Cancellation unavailable: Plant G(s) has no negative real poles (excluding s = 0) to cancel.";
+                    } else {
+                        res.z_c = p_cancel;
+                        double theta_z = std::atan2(wd, sig + res.z_c);
+                        double theta_z_deg = theta_z * 180.0 / PI;
+                        if (phi_deg >= theta_z_deg - 0.5) {
+                            res.valid = false;
+                            err_reason = "✖ Infeasible Pole-Cancellation: cancelling s = -" + PRECISION.fmt(res.z_c) +
+                                         " only gives θ_z = " + PRECISION.fmt(theta_z_deg) +
+                                         "°, which cannot supply Δθ = " + PRECISION.fmt(phi_deg) +
+                                         "° with any finite LHP pole! Use Angle Bisector or 2-Stage Double Lead.";
+                        } else {
+                            double theta_p = theta_z - phi_rad;
+                            res.p_c = -sig + wd / std::tan(theta_p);
+                            res.steps_latex =
+                                "z_c = p_{\\mathrm{plant}} = " + PRECISION.fmt(res.z_c) + " ⟹ "
+                                "\\theta_z = " + PRECISION.fmt(theta_z_deg) + "^\\circ, \\quad "
+                                "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ ⟹ "
+                                "p_c = -\\sigma_d + \\frac{\\omega_d}{\\tan\\theta_p} = " + PRECISION.fmt(res.p_c);
+                        }
+                    }
+                } else {
+                    res.method_name = "User-Specified Zero z_c";
+                    res.z_c = param_v;
+                    double theta_z = std::atan2(wd, sig + res.z_c);
+                    double theta_z_deg = theta_z * 180.0 / PI;
+                    if (phi_deg >= theta_z_deg - 0.5) {
+                        res.valid = false;
+                        err_reason = "✖ Infeasible User Zero z_c = " + PRECISION.fmt(res.z_c) +
+                                     ": zero angle θ_z = " + PRECISION.fmt(theta_z_deg) +
+                                     "° ≤ required Δθ = " + PRECISION.fmt(phi_deg) +
+                                     "° (move zero closer to origin / decrease z_c so θ_z > Δθ).";
+                    } else {
+                        double theta_p = theta_z - phi_rad;
+                        res.p_c = -sig + wd / std::tan(theta_p);
+                        res.steps_latex =
+                            "z_c = " + PRECISION.fmt(res.z_c) + " ⟹ "
+                            "\\theta_z = " + PRECISION.fmt(theta_z_deg) + "^\\circ, \\quad "
+                            "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ ⟹ "
+                            "p_c = " + PRECISION.fmt(res.p_c);
                     }
                 }
-                res.z_c = std::max(1e-3, p_cancel);
-                double theta_z = std::atan2(wd, sig + res.z_c);
-                double theta_p = std::clamp(theta_z - phi_rad, 0.05, PI - 0.05);
-                res.p_c = std::max(1e-3, -sig + wd / std::tan(theta_p));
+            } else if (type_idx == 1) {
+                // 2-STAGE CASCADED DOUBLE LEAD: Gc(s) = Kc * ((s + zc)/(s + pc))^2
+                res.comp_type = "DoubleLead";
+                res.stages = 2;
+                res.method_name = "2-Stage Cascaded Angle Bisector";
+                res.has_zero = true;
+                res.has_pole = true;
+                double half_phi_deg = 0.5 * def_deg;
+                double half_phi_rad = half_phi_deg * PI / 180.0;
+
+                if (half_phi_deg >= psi_deg - 0.5) {
+                    res.valid = false;
+                    err_reason = "✖ Infeasible even for 2-Stage Lead: Δθ/2 = " + PRECISION.fmt(half_phi_deg) +
+                                 "° ≥ ψ = " + PRECISION.fmt(psi_deg) + "°.";
+                } else {
+                    double theta_p = 0.5 * (psi_rad - half_phi_rad);
+                    double theta_z = 0.5 * (psi_rad + half_phi_rad);
+                    res.z_c = -sig + wd / std::tan(theta_z);
+                    res.p_c = -sig + wd / std::tan(theta_p);
+                    res.steps_latex =
+                        "\\phi_{\\mathrm{stage}} = \\frac{\\Delta\\theta}{2} = " + PRECISION.fmt(half_phi_deg) + "^\\circ, \\quad "
+                        "ψ = " + PRECISION.fmt(psi_deg) + "^\\circ ⟹ "
+                        "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\; "
+                        "\\theta_p = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ ⟹ "
+                        "z_c = " + PRECISION.fmt(res.z_c) + ", \\; p_c = " + PRECISION.fmt(res.p_c);
+                }
+            } else if (type_idx == 2) {
+                // IDEAL PD COMPENSATOR: Gc(s) = Kc (s + zc)
+                res.comp_type = "PD";
+                res.stages = 1;
+                res.method_name = "Exact Angle Deficiency Zero Placement";
+                res.has_zero = true;
+                res.has_pole = false;
+                double phi_deg = def_deg;
+                double phi_rad = phi_deg * PI / 180.0;
+                if (phi_deg >= psi_deg - 0.2) {
+                    res.valid = false;
+                    err_reason = "✖ Infeasible for Minimum-Phase Ideal PD: Δθ = " + PRECISION.fmt(phi_deg) +
+                                 "° ≥ ψ = " + PRECISION.fmt(psi_deg) +
+                                 "° (a single LHP zero s = -z_c with z_c > 0 can contribute at most ψ = " +
+                                 PRECISION.fmt(psi_deg) + "°!). Use 2-Stage Double Lead instead.";
+                } else {
+                    res.z_c = -sig + wd / std::tan(phi_rad);
+                    res.p_c = 0.0;
+                    res.steps_latex =
+                        "\\theta_z = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ ⟹ "
+                        "z_c = -\\sigma_d + \\frac{\\omega_d}{\\tan(\\Delta\\theta)} = " + PRECISION.fmt(res.z_c);
+                }
+            } else if (type_idx == 3) {
+                // LAG COMPENSATOR: Gc(s) = Kc (s + z_lag) / (s + p_lag)
+                res.comp_type = "Lag";
+                res.stages = 1;
+                res.method_name = "Small-Angle Origin Placement (z_lag = |σ_d|/10)";
+                res.has_zero = true;
+                res.has_pole = true;
+                double beta = std::max(1.05, param_v);
+                res.z_c = std::max(0.02, std::abs(sig) * 0.10);
+                res.p_c = res.z_c / beta;
+                double lag_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig + res.p_c)) * 180.0 / PI;
                 res.steps_latex =
-                    "z_c = p_{\\mathrm{plant}} = " + PRECISION.fmt(res.z_c) + " \\implies "
-                    "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\quad "
-                    "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ \\implies "
-                    "p_c = -\\sigma_d + \\frac{\\omega_d}{\\tan\\theta_p} = " + PRECISION.fmt(res.p_c);
+                    "\\beta = \\frac{z_{\\mathrm{lag}}}{p_{\\mathrm{lag}}} = " + PRECISION.fmt(beta) + ", \\quad "
+                    "z_{\\mathrm{lag}} = 0.1|\\sigma_d| = " + PRECISION.fmt(res.z_c) + " ⟹ "
+                    "p_{\\mathrm{lag}} = \\frac{z_{\\mathrm{lag}}}{\\beta} = " + PRECISION.fmt(res.p_c) + " \\quad "
+                    "(\\Delta\\theta_{\\mathrm{lag}} = " + PRECISION.fmt(lag_ang) + "^\\circ)";
             } else {
-                // User-Specified Zero z_c
-                res.method_name = "User-Specified Zero z_c";
-                res.z_c = param_v;
-                double theta_z = std::atan2(wd, sig + res.z_c);
-                double theta_p = std::clamp(theta_z - phi_rad, 0.05, PI - 0.05);
-                res.p_c = std::max(1e-3, -sig + wd / std::tan(theta_p));
+                // IDEAL PI COMPENSATOR: Gc(s) = Kc (s + zc) / s
+                res.comp_type = "PI";
+                res.stages = 1;
+                res.method_name = "Integrator at s = 0 + Nearby Zero s = -z_c";
+                res.has_zero = true;
+                res.has_pole = true;
+                res.z_c = std::max(0.01, param_v);
+                res.p_c = 0.0;
+                double pi_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig)) * 180.0 / PI;
                 res.steps_latex =
-                    "z_c = " + PRECISION.fmt(res.z_c) + " \\implies "
-                    "\\theta_z = " + PRECISION.fmt(theta_z * 180.0 / PI) + "^\\circ, \\quad "
-                    "\\theta_p = \\theta_z - \\Delta\\theta = " + PRECISION.fmt(theta_p * 180.0 / PI) + "^\\circ \\implies "
-                    "p_c = " + PRECISION.fmt(res.p_c);
+                    "p_c = 0, \\quad z_c = " + PRECISION.fmt(res.z_c) + " \\quad "
+                    "(\\Delta\\theta_{\\mathrm{PI}} = " + PRECISION.fmt(pi_ang) + "^\\circ \\; \\mathrm{at} \\; s_d)";
             }
-        } else if (type_idx == 1) {
-            // IDEAL PD COMPENSATOR: Gc(s) = Kc (s + zc)
-            res.comp_type = "PD";
-            res.method_name = "Exact Angle Deficiency Zero Placement";
-            res.has_zero = true;
-            res.has_pole = false;
-            res.z_c = std::max(1e-3, -sig + wd / std::tan(phi_rad));
-            res.p_c = 0.0;
-            res.steps_latex =
-                "\\theta_z = \\Delta\\theta = " + PRECISION.fmt(phi_deg) + "^\\circ \\implies "
-                "z_c = -\\sigma_d + \\frac{\\omega_d}{\\tan(\\Delta\\theta)} = " + PRECISION.fmt(res.z_c);
-        } else if (type_idx == 2) {
-            // LAG COMPENSATOR: Gc(s) = Kc (s + zc) / (s + pc) with zc close to origin
-            res.comp_type = "Lag";
-            res.method_name = "Small-Angle Origin Placement (zc = |σd|/10)";
-            res.has_zero = true;
-            res.has_pole = true;
-            double beta = std::max(1.05, param_v);
-            res.z_c = std::max(0.02, std::abs(sig) * 0.10);
-            res.p_c = res.z_c / beta;
-            double lag_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig + res.p_c)) * 180.0 / PI;
-            res.steps_latex =
-                "\\beta = \\frac{z_c}{p_c} = " + PRECISION.fmt(beta) + ", \\quad "
-                "z_c = 0.1|\\sigma_d| = " + PRECISION.fmt(res.z_c) + " \\implies "
-                "p_c = \\frac{z_c}{\\beta} = " + PRECISION.fmt(res.p_c) + " \\quad "
-                "(\\Delta\\theta_{\\mathrm{lag}} = " + PRECISION.fmt(lag_ang) + "^\\circ)";
-        } else {
-            // IDEAL PI COMPENSATOR: Gc(s) = Kc (s + zc) / s
-            res.comp_type = "PI";
-            res.method_name = "Integrator at s = 0 + Nearby Zero s = -zc";
-            res.has_zero = true;
-            res.has_pole = true;
-            res.z_c = std::max(0.01, param_v);
-            res.p_c = 0.0;
-            double pi_ang = (std::atan2(wd, sig + res.z_c) - std::atan2(wd, sig)) * 180.0 / PI;
-            res.steps_latex =
-                "p_c = 0, \\quad z_c = " + PRECISION.fmt(res.z_c) + " \\quad "
-                "(\\Delta\\theta_{\\mathrm{PI}} = " + PRECISION.fmt(pi_ang) + "^\\circ \\text{ at } s_d)";
+        }
+
+        if (!res.valid) {
+            res.gc_latex = "\\mathrm{Infeasible\\; Minimum-Phase\\; LHP\\; Design\\; at}\\; s_d";
+            res.steps_latex = "ψ = \\angle s_d = " + PRECISION.fmt(psi_deg) + "^\\circ, \\quad "
+                              "\\Delta\\theta = " + PRECISION.fmt(def_deg, true) + "^\\circ";
+            res.summary_text = err_reason;
+            comp_gc_math_w->setLatex(QString::fromStdString(res.gc_latex));
+            comp_steps_math_w->setLatex(QString::fromStdString(res.steps_latex));
+            comp_verdict_lbl->setStyleSheet("color: #f87171; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;");
+            comp_verdict_lbl->setText(QString::fromStdString(res.summary_text));
+            if (comp_apply_btn) comp_apply_btn->setEnabled(false);
+            last_comp_res = res;
+            return;
         }
 
         // Compute compensated magnitude & required loop gain Kc at s_d
         std::vector<Complex> comp_poles = loop_poles;
         std::vector<Complex> comp_zeros = loop_zeros;
-        if (res.has_zero) comp_zeros.push_back(Complex(-res.z_c, 0.0));
-        if (res.has_pole) comp_poles.push_back(Complex(-res.p_c, 0.0));
+        for (int s = 0; s < res.stages; ++s) {
+            if (res.has_zero) comp_zeros.push_back(Complex(-res.z_c, 0.0));
+            if (res.has_pole) comp_poles.push_back(Complex(-res.p_c, 0.0));
+        }
 
         auto ev_comp = evaluateTransferFunction(comp_poles, comp_zeros, sd, 1.0);
         res.k_c = std::isfinite(ev_comp.rl_gain_k) ? ev_comp.rl_gain_k : 1.0;
-        res.valid = true;
 
         if (res.comp_type == "PD") {
             res.gc_latex = "G_c(s) = K_c (s + " + PRECISION.fmt(res.z_c) + "), \\quad K_c = " + PRECISION.fmt(res.k_c);
         } else if (res.comp_type == "PI") {
             res.gc_latex = "G_c(s) = K_c \\frac{s + " + PRECISION.fmt(res.z_c) + "}{s}, \\quad K_c = " + PRECISION.fmt(res.k_c);
+        } else if (res.comp_type == "DoubleLead") {
+            res.gc_latex = "G_c(s) = K_c \\left(\\frac{s + " + PRECISION.fmt(res.z_c) + "}{s + " + PRECISION.fmt(res.p_c) + "}\\right)^2, \\quad K_c = " + PRECISION.fmt(res.k_c);
         } else {
             res.gc_latex = "G_c(s) = K_c \\frac{s + " + PRECISION.fmt(res.z_c) + "}{s + " + PRECISION.fmt(res.p_c) + "}, \\quad K_c = " + PRECISION.fmt(res.k_c);
         }
 
         double new_def = computeAngleDeficiency(ev_comp.angle_deg);
         res.summary_text = "✔ Compensated Loop @ s_d:  ∠Gc(s_d)G(s_d)H(s_d) = " + PRECISION.fmt(ev_comp.angle_deg) +
-                           "°  (|Δθ| = " + PRECISION.fmt(std::abs(new_def)) + "°)  •  Required Gain Kc = " + PRECISION.fmt(res.k_c);
+                           "°  (|Δθ| = " + PRECISION.fmt(std::abs(new_def)) + "°)  •  Required Gain Kc = " +
+                           PRECISION.fmt(res.k_c) + warn_note;
 
         comp_gc_math_w->setLatex(QString::fromStdString(res.gc_latex));
         comp_steps_math_w->setLatex(QString::fromStdString(res.steps_latex));
+        comp_verdict_lbl->setStyleSheet(warn_note.empty()
+            ? "color: #a7f3d0; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;"
+            : "color: #fde68a; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;");
         comp_verdict_lbl->setText(QString::fromStdString(res.summary_text));
+        if (comp_apply_btn) comp_apply_btn->setEnabled(true);
         last_comp_res = res;
     }
 

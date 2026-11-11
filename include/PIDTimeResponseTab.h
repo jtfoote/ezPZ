@@ -28,6 +28,8 @@ public:
     FeedbackConfigBar* fb_bar;
     MathFormulaWidget* tf_math_w;
 
+    QCheckBox* chk_ol = nullptr;
+
     MathFormulaWidget* pid_design_formula_w;
     std::map<std::string, bool> pid_lock_map = {
         {"kp", false}, {"kd", true}, {"ki", true}, {"os_pct", true},
@@ -205,6 +207,7 @@ public:
             vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(title); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
             val_lbl = new QLabel("—"); val_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            val_lbl->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(val_lbl);
             mgrid->addWidget(b, r, c);
         };
@@ -223,7 +226,7 @@ public:
         auto* plot_hdr = new QHBoxLayout();
         auto* pt = new QLabel("Time-Domain Response  y(t)  (L-Click: Cursor t • Scroll: Zoom • R-Drag: Pan)");
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
-        auto* chk_ol = new QCheckBox("Overlay Open-Loop"); chk_ol->setStyleSheet("color: #f59e0b; font-weight: bold;");
+        chk_ol = new QCheckBox("Overlay Open-Loop"); chk_ol->setStyleSheet("color: #f59e0b; font-weight: bold;");
         auto* chk_u  = new QCheckBox("Control u(t)");      chk_u->setStyleSheet("color: #ff5f56; font-weight: bold;");
         auto* chk_in = new QCheckBox("s-Plane Inset");     chk_in->setChecked(true); chk_in->setStyleSheet("color: #34d399; font-weight: bold;");
         auto* fit_b  = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
@@ -235,7 +238,7 @@ public:
         attachSvgExportMenu(canvas, "time_response.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 380));
+        splitter->addWidget(wrapInLeftScroll(left_w, 430));
         splitter->addWidget(right_card);
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
@@ -335,9 +338,16 @@ public:
         });
 
         connect(design_ctrl_btn, &QPushButton::clicked, this, [this, applyPidDesign]() {
+            model->comp_enabled_s = false;
             pid_input_map["kp"] = parseNumericInput(kp_edit->text().toStdString(), model->kp);
-            pid_input_map["kd"] = parseNumericInput(kd_edit->text().toStdString(), model->kd);
-            pid_input_map["ki"] = parseNumericInput(ki_edit->text().toStdString(), model->ki);
+            if (!pid_lock_map["kp"] && pid_lock_map["kd"] && pid_lock_map["ki"]) {
+                // Default quick-synthesis mode: pure Proportional design for Target %OS
+                pid_input_map["kd"] = 0.0;
+                pid_input_map["ki"] = 0.0;
+            } else {
+                pid_input_map["kd"] = parseNumericInput(kd_edit->text().toStdString(), model->kd);
+                pid_input_map["ki"] = parseNumericInput(ki_edit->text().toStdString(), model->ki);
+            }
             pid_input_map["os_pct"] = parseNumericInput(os_target_edit->text().toStdString(), 20.0);
             auto ans = ParameterMatrixEngine::evaluate(pid_lock_map, pid_input_map, model);
             applyPidDesign(ans);
@@ -359,9 +369,12 @@ public:
             dlg->show();
         });
 
-        for (auto* ed : {mag_edit, gain_edit, cursor_edit, tmax_edit, tol_edit}) {
+        for (auto* ed : {mag_edit, gain_edit, tmax_edit, tol_edit}) {
             connect(ed, &QLineEdit::editingFinished, this, [this]() { runSimulation(true); });
         }
+        connect(cursor_edit, &QLineEdit::editingFinished, this, [this]() {
+            updateCursorOnly(parseNumericInput(cursor_edit->text().toStdString(), 0.0));
+        });
         connect(sig_combo, &QComboBox::currentTextChanged, this, [this]() { runSimulation(true); });
         connect(chk_ol, &QCheckBox::toggled, this, [this](bool v) { canvas->show_ol = v; canvas->update(); });
         connect(chk_u,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_u  = v; canvas->update(); });
@@ -370,8 +383,10 @@ public:
         connect(fit_b,  &QPushButton::clicked, this, [this]() { canvas->resetView(); });
 
         canvas->onCursorChanged = [this](double t_val) {
-            cursor_edit->setText(QString::number(t_val, 'g', 4));
-            runSimulation(false);
+            updating_ui = true;
+            cursor_edit->setText(QString::number(t_val, 'g', 6));
+            updating_ui = false;
+            updateCursorOnly(t_val);
         };
 
         loadFromModel();
@@ -424,7 +439,7 @@ public:
             model->zeros = pn.roots;
             model->poles = pd.roots;
 
-            double ratio = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
+            double ratio = pn.leading_gain / pd.leading_gain; // Preserves negative sign on -s - 2!
             if (std::abs(ratio) > 1e-12) {
                 model->plant_gain = ratio;
                 gain_edit->setText(QString::number(ratio, 'g', 5));
@@ -471,6 +486,57 @@ public:
         runSimulation(false);
     }
 
+    void updateCursorOnly(double t_val) {
+        if (!canvas->sim_res.has_value() || canvas->sim_res->t.empty()) {
+            runSimulation(false);
+            return;
+        }
+        auto& res = *canvas->sim_res;
+        res.cursor_t = std::clamp(t_val, 0.0, res.t.back());
+        cfg.cursor_time = res.cursor_t;
+
+        auto it_hi = std::lower_bound(res.t.begin(), res.t.end(), res.cursor_t);
+        if (it_hi == res.t.begin()) {
+            res.cursor_y = res.y_primary.front();
+            res.cursor_u = res.u_control.front();
+            res.cursor_r = res.r.front();
+        } else if (it_hi == res.t.end()) {
+            res.cursor_y = res.y_primary.back();
+            res.cursor_u = res.u_control.back();
+            res.cursor_r = res.r.back();
+        } else {
+            size_t i1 = static_cast<size_t>(std::distance(res.t.begin(), it_hi));
+            size_t i0 = i1 - 1;
+            double dt_seg = res.t[i1] - res.t[i0];
+            double alpha = (dt_seg > 1e-15) ? ((res.cursor_t - res.t[i0]) / dt_seg) : 0.0;
+            res.cursor_y = res.y_primary[i0] + alpha * (res.y_primary[i1] - res.y_primary[i0]);
+            res.cursor_u = res.u_control[i0] + alpha * (res.u_control[i1] - res.u_control[i0]);
+            res.cursor_r = res.r[i0] + alpha * (res.r[i1] - res.r[i0]);
+        }
+
+        if (std::abs(res.cursor_t - res.peak_time) < 1e-9) {
+            res.cursor_y = Complex(res.peak_value, 0.0);
+        }
+
+        double abs_mag = std::max(std::abs(cfg.input_magnitude), 1e-12);
+        double tol_frac = std::max(cfg.settle_tol_pct, 0.05) / 100.0;
+        res.cursor_abs_err = std::abs(res.cursor_r - res.cursor_y);
+        res.cursor_rel_err_pct = (res.cursor_abs_err / abs_mag) * 100.0;
+        res.cursor_within_tol = (std::abs(res.cursor_y - res.y_steady) / std::max(std::abs(res.y_steady), 1.0)) <= tol_frac;
+
+        model->last_sim_result = res;
+
+        m_card6->setText(QString("y(%1s): %2 | e(t): %3 (%4%)\nu(%1s): %5 | r(t): %6")
+            .arg(QString::fromStdString(PRECISION.fmt(res.cursor_t)))
+            .arg(QString::fromStdString(PRECISION.fmtComplex(res.cursor_y)))
+            .arg(QString::fromStdString(PRECISION.fmt(res.cursor_abs_err)))
+            .arg(QString::fromStdString(PRECISION.fmt(res.cursor_rel_err_pct)))
+            .arg(QString::fromStdString(PRECISION.fmtComplex(res.cursor_u)))
+            .arg(QString::fromStdString(PRECISION.fmt(res.cursor_r))));
+
+        canvas->update();
+    }
+
     void runSimulation(bool notify) {
         if (updating_ui) return;
         cfg.poles = model->poles;
@@ -511,7 +577,7 @@ public:
         cfg.kd = parseNumericInput(kd_edit->text().toStdString(), 0.0);
         cfg.signal_type = sig_combo->currentText().toStdString();
         cfg.cursor_time = parseNumericInput(cursor_edit->text().toStdString(), 2.5);
-        cfg.t_max = std::max(0.2, parseNumericInput(tmax_edit->text().toStdString(), 10.0));
+        cfg.t_max = std::max(1e-6, parseNumericInput(tmax_edit->text().toStdString(), 10.0));
         cfg.settle_tol_pct = std::max(0.1, parseNumericInput(tol_edit->text().toStdString(), 2.0));
 
         SimulationResult res = ComplexTransferFunctionSimulator::evaluate(cfg);
@@ -555,13 +621,17 @@ public:
             .arg(QString::fromStdString(PRECISION.fmt(res.steady_state_error)))
             .arg(QString::fromStdString(PRECISION.fmt(res.relative_error_pct))));
 
-        m_card2->setText(QString("Tr: %1s (Nise: %2s) | Tp: %3s\nTs(±2%): %4s (4/σd: %5s) | Ts(±5%): %6s")
-            .arg(QString::fromStdString(PRECISION.fmt(res.rise_time)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.theo_tr_sec)))
+        auto fmtSec = [](const std::optional<double>& v, const std::string& fallback = "—") -> QString {
+            if (!v.has_value() || !std::isfinite(*v)) return QString::fromStdString(fallback);
+            return QString::fromStdString(PRECISION.fmt(*v) + "s");
+        };
+        m_card2->setText(QString("Tr: %1 (Nise: %2) | Tp: %3s\nTs(±2%): %4 (4/σd: %5) | Ts(±5%): %6")
+            .arg(fmtSec(res.rise_time))
+            .arg(fmtSec(res.theo_tr_sec))
             .arg(QString::fromStdString(PRECISION.fmt(res.peak_time)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.settling_time, false, false, ">Tmax")))
-            .arg(QString::fromStdString(PRECISION.fmt(res.theo_ts2_sec)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.settling_time_5pct, false, false, ">Tmax"))));
+            .arg(fmtSec(res.settling_time, ">Tmax"))
+            .arg(fmtSec(res.theo_ts2_sec, "∞"))
+            .arg(fmtSec(res.settling_time_5pct, ">Tmax")));
 
         m_card3->setText(QString("ζ: %1 (OL: %2) | ωn: %3 r/s\nωd: %4 r/s | σd: %5 s⁻¹ (τ=%6s)")
             .arg(QString::fromStdString(PRECISION.fmt(res.zeta)))
@@ -594,7 +664,7 @@ public:
 
         canvas->sim_res = res;
         canvas->show_cl = cfg.closed_loop;
-        if (!cfg.closed_loop) canvas->show_ol = true;
+        canvas->show_ol = (!cfg.closed_loop) || (chk_ol && chk_ol->isChecked());
         canvas->settle_tol_pct = cfg.settle_tol_pct;
         canvas->update();
     }

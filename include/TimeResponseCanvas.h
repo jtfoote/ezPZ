@@ -52,6 +52,9 @@ protected:
     double start_inset_w = 190.0, start_inset_h = 155.0;
     QRectF last_inset_rect;
 
+    bool has_valid_peak = false;
+    QPointF last_peak_px;
+
     struct InsetMarkerHit {
         QPointF px;
         Complex val;
@@ -124,7 +127,9 @@ protected:
 
         p.setPen(QColor(Theme::TEXT_SECONDARY));
         p.setFont(QFont("Sans", 8, QFont::Bold));
-        QString title = is_discrete ? "z-Plane (× Pole, ○ Zero)" : "Closed-Loop s-Plane (× Pole, ○ Zero)";
+        QString title = is_discrete
+            ? (show_cl ? "Closed-Loop z-Plane (×, ○)" : "Open-Loop z-Plane (×, ○)")
+            : (show_cl ? "Closed-Loop s-Plane (× Pole, ○ Zero)" : "Open-Loop s-Plane (× Pole, ○ Zero)");
         p.drawText(QRectF(ir.left() + 6, ir.top() + 3, ir.width() - 12, 14), Qt::AlignCenter, title);
 
         // Draw bottom-left diagonal resize grip indicator (⤡)
@@ -140,11 +145,17 @@ protected:
         if (!is_discrete && sim_res.has_value()) {
             ol_p = sim_res->ol_poles;
             ol_z = sim_res->ol_zeros;
-            for (const auto& cp : sim_res->cl_poles) {
-                if (std::abs(cp.real()) < 65.0) cl_p.push_back(cp);
-            }
-            for (const auto& cz : sim_res->cl_zeros) {
-                if (std::abs(cz.real()) < 65.0) cl_z.push_back(cz);
+            if (show_cl) {
+                double max_ol = 10.0;
+                for (const auto& op : ol_p) max_ol = std::max(max_ol, std::abs(op));
+                double cutoff = std::max(180.0, max_ol * 5.0);
+                for (const auto& cp : sim_res->cl_poles) {
+                    if (std::abs(cp.real()) <= cutoff) cl_p.push_back(cp);
+                }
+                for (const auto& cz : sim_res->cl_zeros) {
+                    if (std::abs(cz.real()) <= cutoff) cl_z.push_back(cz);
+                }
+                if (cl_p.empty()) cl_p = sim_res->cl_poles;
             }
         } else if (is_discrete && dsim_res.has_value()) {
             ol_p = dsim_res->ol_z_poles;
@@ -220,7 +231,7 @@ protected:
             inset_hits.push_back({px, pl, is_discrete ? "Open-Loop z-Pole" : "Open-Loop Pole"});
         }
 
-        // 3. Closed-Loop Zeros (emerald green o)
+        // 3. Closed-Loop Zeros (emerald green o) — only drawn when Closed-Loop is active
         p.setPen(QPen(QColor(Theme::ACCENT_PID), 1.8));
         p.setBrush(QColor(Theme::BG_PLOT));
         for (const auto& cz : cl_z) {
@@ -229,7 +240,7 @@ protected:
             inset_hits.push_back({px, cz, is_discrete ? "Closed-Loop z-Zero" : "Closed-Loop Zero"});
         }
 
-        // 4. Closed-Loop Poles (purple x)
+        // 4. Closed-Loop Poles (purple x) — only drawn when Closed-Loop is active
         p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.0));
         for (const auto& pl : cl_p) {
             QPointF px = toInsetPx(pl);
@@ -342,18 +353,34 @@ protected:
                 p.drawPath(u_p);
             }
 
+            // Peak (Tp) Diamond Marker (drawn when peak occurs strictly before t_max)
+            has_valid_peak = !r.t.empty() && (r.peak_time > 0.0) && (r.peak_time < r.t.back() * (1.0 - 1e-4));
+            if (has_valid_peak) {
+                last_peak_px = toPx(r.peak_time, r.peak_value);
+                QPolygonF dia;
+                dia << (last_peak_px + QPointF(0, -5.8)) << (last_peak_px + QPointF(5.8, 0))
+                    << (last_peak_px + QPointF(0,  5.8)) << (last_peak_px + QPointF(-5.8, 0));
+                p.setPen(QPen(Qt::white, 1.2));
+                p.setBrush(QColor("#f472b6")); // Matches Tp spec color
+                p.drawPolygon(dia);
+            }
+
             // Cursor
+            bool at_tp = has_valid_peak && (std::abs(r.cursor_t - r.peak_time) <= 1e-7 * r.t.back());
             QPointF c_px = toPx(r.cursor_t, r.cursor_y.real());
-            QColor b_col(r.cursor_within_tol ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
-            p.setPen(QPen(b_col, 1.0, Qt::DashLine));
+            QColor b_col = at_tp ? QColor("#f472b6")
+                                 : QColor(r.cursor_within_tol ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
+            p.setPen(QPen(b_col, 1.1, Qt::DashLine));
             p.drawLine(QPointF(c_px.x(), pad_t), QPointF(c_px.x(), pad_t + eh));
             p.setBrush(Qt::white);
             p.setPen(QPen(b_col, 2.2));
             p.drawEllipse(c_px, 5.5, 5.5);
 
-            QString tag = QString("t=%1s, y=%2")
+            QString tag = QString("%1t=%2s, y=%3")
+                .arg(at_tp ? "[Tp] " : "")
                 .arg(QString::fromStdString(PRECISION.fmt(r.cursor_t)))
                 .arg(QString::fromStdString(PRECISION.fmtComplex(r.cursor_y)));
+            p.setPen(b_col);
             p.setFont(QFont("Monospace", 9, QFont::Bold));
             p.drawText(c_px + QPointF(10, -10), tag);
         } else {
@@ -396,18 +423,33 @@ protected:
             p.setPen(QPen(seq_col, 2.0));
             p.drawPath(path);
 
+            has_valid_peak = !r.k_idx.empty() && (r.peak_k > 0) && (r.peak_k < r.k_idx.back());
+            if (has_valid_peak) {
+                last_peak_px = toPx(r.peak_k, r.peak_value);
+                QPolygonF dia;
+                dia << (last_peak_px + QPointF(0, -5.8)) << (last_peak_px + QPointF(5.8, 0))
+                    << (last_peak_px + QPointF(0,  5.8)) << (last_peak_px + QPointF(-5.8, 0));
+                p.setPen(QPen(Qt::white, 1.2));
+                p.setBrush(QColor("#f472b6"));
+                p.drawPolygon(dia);
+            }
+
+            bool at_tp = has_valid_peak && (r.cursor_k == r.peak_k);
             QPointF c_px = toPx(r.cursor_k, r.cursor_y.real());
-            QColor b_col(r.cursor_within_tol ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
-            p.setPen(QPen(b_col, 1.0, Qt::DashLine));
+            QColor b_col = at_tp ? QColor("#f472b6")
+                                 : QColor(r.cursor_within_tol ? Theme::ACCENT_PID : Theme::ACCENT_OPEN);
+            p.setPen(QPen(b_col, 1.1, Qt::DashLine));
             p.drawLine(QPointF(c_px.x(), pad_t), QPointF(c_px.x(), pad_t + eh));
             p.setBrush(Qt::white);
             p.setPen(QPen(b_col, 2.2));
             p.drawEllipse(c_px, 5.5, 5.5);
 
-            QString tag = QString("k=%1 (t=%2s), y=%3")
+            QString tag = QString("%1k=%2 (t=%3s), y=%4")
+                .arg(at_tp ? "[Tp] " : "")
                 .arg(r.cursor_k)
                 .arg(QString::fromStdString(PRECISION.fmt(r.cursor_t)))
                 .arg(QString::fromStdString(PRECISION.fmtComplex(r.cursor_y)));
+            p.setPen(b_col);
             p.setFont(QFont("Monospace", 9, QFont::Bold));
             p.drawText(c_px + QPointF(10, -10), tag);
         }
@@ -490,6 +532,20 @@ protected:
                 QToolTip::hideText();
                 return;
             }
+            if (has_valid_peak &&
+                std::hypot(e->position().x() - last_peak_px.x(),
+                           e->position().y() - last_peak_px.y()) <= 10.0) {
+                setCursor(Qt::PointingHandCursor);
+                QString pk_tip = !is_discrete && sim_res.has_value()
+                    ? QString("Peak Response (Tp)\nTp = %1 s  •  Peak = %2\nClick to snap cursor (Hold Shift to bypass)")
+                          .arg(QString::fromStdString(PRECISION.fmt(sim_res->peak_time)))
+                          .arg(QString::fromStdString(PRECISION.fmt(sim_res->peak_value)))
+                    : QString("Peak Sample\nk = %1  •  Peak = %2\nClick to snap cursor")
+                          .arg(dsim_res.has_value() ? dsim_res->peak_k : 0)
+                          .arg(QString::fromStdString(PRECISION.fmt(dsim_res.has_value() ? dsim_res->peak_value : 0.0)));
+                QToolTip::showText(e->globalPosition().toPoint(), pk_tip, this);
+                return;
+            }
             setCursor(Qt::CrossCursor);
             QToolTip::hideText();
         }
@@ -545,11 +601,27 @@ private:
         double ew = std::max(10.0, width() - pad_l - pad_r);
         double frac = std::clamp((px - pad_l) / ew, 0.0, 1.0);
         double x_val = x_min + frac * (x_max - x_min);
+        bool allow_snap = !(QGuiApplication::keyboardModifiers() & Qt::ShiftModifier);
+
         if (!is_discrete && sim_res.has_value() && !sim_res->t.empty()) {
-            double clamped_t = std::clamp(x_val, 0.0, sim_res->t.back());
+            const auto& r = sim_res.value();
+            double clamped_t = std::clamp(x_val, 0.0, r.t.back());
+            if (allow_snap && r.peak_time > 0.0 && r.peak_time < r.t.back() * (1.0 - 1e-4)) {
+                double pk_px = pad_l + (r.peak_time - x_min) / std::max(x_max - x_min, 1e-9) * ew;
+                if (std::abs(px - pk_px) <= 9.0) {
+                    clamped_t = r.peak_time;
+                }
+            }
             if (onCursorChanged) onCursorChanged(clamped_t);
         } else if (is_discrete && dsim_res.has_value() && !dsim_res->k_idx.empty()) {
-            double clamped_k = std::clamp(std::round(x_val), 0.0, double(dsim_res->k_idx.back()));
+            const auto& r = dsim_res.value();
+            double clamped_k = std::clamp(std::round(x_val), 0.0, double(r.k_idx.back()));
+            if (allow_snap && r.peak_k > 0 && r.peak_k < r.k_idx.back()) {
+                double pk_px = pad_l + (double(r.peak_k) - x_min) / std::max(x_max - x_min, 1e-9) * ew;
+                if (std::abs(px - pk_px) <= 9.0) {
+                    clamped_k = double(r.peak_k);
+                }
+            }
             if (onCursorChanged) onCursorChanged(clamped_k);
         }
     }

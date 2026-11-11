@@ -54,6 +54,8 @@ public:
     bool show_dep_arr_angles = true;
     bool show_test_point = true;
 
+    QString param_sym = "K";
+
     struct DepArrInfo {
         Complex pt;
         double angle_deg;
@@ -155,6 +157,49 @@ protected:
         return Complex(re, im);
     }
 
+    bool clipLineToScreen(QPointF& p1, QPointF& p2, double margin = 40.0) const {
+        double xmin = -margin, xmax = width() + margin;
+        double ymin = -margin, ymax = height() + margin;
+        double dx = p2.x() - p1.x(), dy = p2.y() - p1.y();
+        double t0 = 0.0, t1 = 1.0;
+
+        auto clipEdge = [&](double p, double q) -> bool {
+            if (std::abs(p) < 1e-12) return q >= 0.0;
+            double r = q / p;
+            if (p < 0.0) {
+                if (r > t1) return false;
+                if (r > t0) t0 = r;
+            } else {
+                if (r < t0) return false;
+                if (r < t1) t1 = r;
+            }
+            return true;
+        };
+
+        if (!clipEdge(-dx, p1.x() - xmin) || !clipEdge(dx, xmax - p1.x()) ||
+            !clipEdge(-dy, p1.y() - ymin) || !clipEdge(dy, ymax - p1.y())) {
+            return false;
+        }
+        QPointF c1(p1.x() + t0 * dx, p1.y() + t0 * dy);
+        QPointF c2(p1.x() + t1 * dx, p1.y() + t1 * dy);
+        p1 = c1;
+        p2 = c2;
+        return true;
+    }
+
+    void drawClippedLine(QPainter& p, QPointF a, QPointF b) const {
+        if (clipLineToScreen(a, b)) p.drawLine(a, b);
+    }
+
+    // World-space radius guaranteed to reach past all 4 corners of the current zoomed view
+    double farViewRadiusFrom(Complex origin) const {
+        double d1 = std::hypot(min_r - origin.real(), min_i - origin.imag());
+        double d2 = std::hypot(min_r - origin.real(), max_i - origin.imag());
+        double d3 = std::hypot(max_r - origin.real(), min_i - origin.imag());
+        double d4 = std::hypot(max_r - origin.real(), max_i - origin.imag());
+        return std::max({d1, d2, d3, d4, 1.0}) * 1.5;
+    }
+
     static void drawDirectionArrow(QPainter& p, QPointF p1, QPointF p2) {
         double dx = p2.x() - p1.x();
         double dy = p2.y() - p1.y();
@@ -186,6 +231,11 @@ protected:
         badge_bg.setAlpha(235);
         p.setRenderHint(QPainter::Antialiasing, true);
         p.fillRect(rect(), QColor(Theme::BG_PLOT));
+
+        double pz_scale = 1.0;
+        for (const auto& pt : poles) pz_scale = std::max(pz_scale, std::abs(pt));
+        for (const auto& zt : zeros) pz_scale = std::max(pz_scale, std::abs(zt));
+        double max_world_jump = pz_scale * 3.5 + 4.0; // Zoom-independent!
 
         // Grid & Tick Labels (1:1 Square Grid)
         double span = std::min(max_r - min_r, max_i - min_i);
@@ -266,12 +316,12 @@ protected:
             for (const auto& zt : zeros) sum_z += zt.real();
             double sigma_a = (sum_p - sum_z) / double(diff);
             QPointF c_px = toPx({sigma_a, 0.0});
-            double rad = span * 3.0;
+            double rad = farViewRadiusFrom({sigma_a, 0.0});
             p.setPen(QPen(QColor(Theme::ACCENT_ASYMP), 1.3, Qt::DashLine));
             for (int k = 0; k < std::abs(diff); ++k) {
                 double ang = (2.0 * k + 1.0) * PI / std::abs(diff);
                 QPointF far_px = toPx({sigma_a + rad * std::cos(ang), rad * std::sin(ang)});
-                p.drawLine(c_px, far_px);
+                drawClippedLine(p, c_px, far_px);
             }
         }
 
@@ -282,29 +332,16 @@ protected:
                 cached_ghost_zeros = ghost_zeros;
                 cached_ghost_branches = computeRootLocusBranches(ghost_poles, ghost_zeros);
             }
-            double max_jump = std::max(width(), height()) * 0.45;
-            QColor ghost_col(148, 163, 184, 120); // Muted Slate-Silver dashed curve
+            QColor ghost_col(148, 163, 184, 120);
             p.setPen(QPen(ghost_col, 1.8, Qt::DashLine));
             p.setBrush(Qt::NoBrush);
 
             for (const auto& br : cached_ghost_branches) {
-                QPainterPath gpath;
-                bool started = false;
-                QPointF prev_px;
-                for (const auto& pt : br) {
-                    QPointF cur_px = toPx(pt);
-                    if (!started) {
-                        gpath.moveTo(cur_px);
-                        started = true;
-                    } else {
-                        if (std::hypot(cur_px.x() - prev_px.x(), cur_px.y() - prev_px.y()) > max_jump)
-                            gpath.moveTo(cur_px);
-                        else
-                            gpath.lineTo(cur_px);
+                for (size_t i = 0; i + 1 < br.size(); ++i) {
+                    if (std::abs(br[i + 1] - br[i]) <= max_world_jump) {
+                        drawClippedLine(p, toPx(br[i]), toPx(br[i + 1]));
                     }
-                    prev_px = cur_px;
                 }
-                p.drawPath(gpath);
             }
 
             // Faint Ghost Open-Loop Poles (×) and Zeros (○)
@@ -322,52 +359,71 @@ protected:
 
         // Root Locus Branches + Directional Arrows (➤)
         if (show_locus) {
+            // Update cached Root Locus branches whenever poles or zeros change
             if (poles != cached_poles || zeros != cached_zeros) {
                 cached_poles = poles;
                 cached_zeros = zeros;
-                cached_branches = computeRootLocusBranches(poles, zeros);
+                cached_branches = poles.empty() ? std::vector<std::vector<Complex>>{}
+                                                : computeRootLocusBranches(poles, zeros);
             }
-            const auto& branches = cached_branches;
-            double max_jump = std::max(width(), height()) * 0.45;
-            for (const auto& br : branches) {
-                QPainterPath path;
-                bool started = false;
-                QPointF prev_px;
-                double accum_px = 0.0, next_arrow_at = 42.0, arrow_spacing = 85.0;
-                std::vector<std::pair<QPointF, QPointF>> arrows;
 
-                for (const auto& pt : br) {
-                    QPointF cur_px = toPx(pt);
-                    if (!started) {
-                        path.moveTo(cur_px);
-                        started = true;
-                    } else {
-                        double dist = std::hypot(cur_px.x() - prev_px.x(), cur_px.y() - prev_px.y());
-                        if (dist > max_jump) {
-                            p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.2));
-                            p.setBrush(Qt::NoBrush);
-                            p.drawPath(path);
-                            path = QPainterPath();
-                            path.moveTo(cur_px);
-                            accum_px = 0.0; next_arrow_at = 42.0;
-                        } else {
-                            path.lineTo(cur_px);
-                            if (cur_px.x() >= -20 && cur_px.x() <= width() + 20 &&
-                                cur_px.y() >= -20 && cur_px.y() <= height() + 20 && dist > 0.8) {
-                                accum_px += dist;
-                                if (accum_px >= next_arrow_at) {
-                                    arrows.push_back({prev_px, cur_px});
-                                    next_arrow_at = accum_px + arrow_spacing;
-                                }
-                            }
-                        }
-                    }
-                    prev_px = cur_px;
-                }
+            // Root Locus Branches + Directional Arrows (➤)
+            if (show_locus && !cached_branches.empty()) {
+                double pz_scale = 1.0;
+                for (const auto& pt : poles) pz_scale = std::max(pz_scale, std::abs(pt));
+                for (const auto& zt : zeros) pz_scale = std::max(pz_scale, std::abs(zt));
+                // World-space discontinuity threshold (zoom-independent!)
+                double max_world_jump = std::max(pz_scale * 8.0, 25.0);
+
                 p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.2));
                 p.setBrush(Qt::NoBrush);
-                p.drawPath(path);
-                for (const auto& [a1, a2] : arrows) drawDirectionArrow(p, a1, a2);
+
+                for (const auto& br : cached_branches) {
+                    if (br.size() < 2) continue;
+                    double accum_px = 0.0, next_arrow_at = 42.0;
+                    const double arrow_spacing = 85.0;
+                    std::vector<std::pair<QPointF, QPointF>> arrows;
+
+                    for (size_t i = 0; i + 1 < br.size(); ++i) {
+                        // Only break across genuine world-space branch jumps, never zoom magnification
+                        if (std::abs(br[i + 1] - br[i]) > max_world_jump) {
+                            accum_px = 0.0;
+                            next_arrow_at = 42.0;
+                            continue;
+                        }
+
+                        QPointF seg_a = toPx(br[i]);
+                        QPointF seg_b = toPx(br[i + 1]);
+                        if (clipLineToScreen(seg_a, seg_b, 24.0)) {
+                            p.drawLine(seg_a, seg_b);
+
+                            double dx = seg_b.x() - seg_a.x();
+                            double dy = seg_b.y() - seg_a.y();
+                            double vis_len = std::hypot(dx, dy);
+                            if (vis_len > 0.5) {
+                                double ux = dx / vis_len;
+                                double uy = dy / vis_len;
+                                while (accum_px + vis_len >= next_arrow_at) {
+                                    double d_along = next_arrow_at - accum_px;
+                                    QPointF mid_pt(seg_a.x() + ux * d_along, seg_a.y() + uy * d_along);
+                                    arrows.push_back({mid_pt - QPointF(ux * 5.0, uy * 5.0),
+                                                    mid_pt + QPointF(ux * 5.0, uy * 5.0)});
+                                    next_arrow_at += arrow_spacing;
+                                }
+                                accum_px += vis_len;
+                            }
+                        } else {
+                            // Reset arrow spacing when branch exits and re-enters the viewport
+                            accum_px = 0.0;
+                            next_arrow_at = 42.0;
+                        }
+                    }
+
+                    for (const auto& [a1, a2] : arrows) drawDirectionArrow(p, a1, a2);
+                    // Restore locus pen for the next branch after drawDirectionArrow changes pen/brush
+                    p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.2));
+                    p.setBrush(Qt::NoBrush);
+                }
             }
         }
 
@@ -454,20 +510,23 @@ protected:
             if (show_zeta_line && spec_zeta >= 0.0 && spec_zeta <= 1.0) {
                 QColor z_col("#facc15"); // Amber-Gold
                 double sin_th = std::sqrt(std::max(0.0, 1.0 - spec_zeta * spec_zeta));
-                double ray_len = span * 4.0;
+                double ray_len = farViewRadiusFrom({0.0, 0.0});
                 QPointF p_orig = toPx({0.0, 0.0});
                 QPointF p_up   = toPx({-ray_len * spec_zeta,  ray_len * sin_th});
                 QPointF p_dn   = toPx({-ray_len * spec_zeta, -ray_len * sin_th});
 
                 p.setPen(QPen(z_col, 1.5, Qt::DashLine));
-                p.drawLine(p_orig, p_up);
-                if (sin_th > 1e-6) p.drawLine(p_orig, p_dn);
-
-                QPointF lbl_pos = toPx({-0.38 * span * spec_zeta, 0.38 * span * sin_th});
-                p.setFont(QFont("Monospace", 8, QFont::Bold));
-                p.drawText(lbl_pos + QPointF(6, -6), QString("ζ=%1 (%OS=%2%)")
-                    .arg(QString::fromStdString(PRECISION.fmt(spec_zeta)))
-                    .arg(QString::fromStdString(PRECISION.fmt(niseOsFromZeta(spec_zeta)))));
+                QPointF vis_a = p_orig, vis_b = p_up;
+                if (clipLineToScreen(vis_a, vis_b, 0.0)) {
+                    p.drawLine(vis_a, vis_b);
+                    // Pin the ζ label onto the visible portion of the ray even when zoomed in!
+                    QPointF lbl_pos = 0.65 * vis_a + 0.35 * vis_b;
+                    p.setFont(QFont("Monospace", 8, QFont::Bold));
+                    p.drawText(lbl_pos + QPointF(6, -6), QString("ζ=%1 (%OS=%2%)")
+                        .arg(QString::fromStdString(PRECISION.fmt(spec_zeta)))
+                        .arg(QString::fromStdString(PRECISION.fmt(niseOsFromZeta(spec_zeta)))));
+                }
+                if (sin_th > 1e-6) drawClippedLine(p, p_orig, p_dn);
 
                 // Ray equation in LHP: sin_th * Re(s) + spec_zeta * |Im(s)| = 0
                 std::vector<double> signs = (sin_th > 1e-6) ? std::vector<double>{1.0, -1.0}
@@ -553,14 +612,16 @@ protected:
                     if (is_spec_pair) {
                         auto ev_s = evaluateTransferFunction(poles, zeros, ix.pt, 1.0);
                         double def_d = computeAngleDeficiency(ev_s.angle_deg);
-                        txt = QString("[%1] s=%2 | Δθ=%3°, K=%4")
+                        txt = QString("[%1] s=%2 | Δθ=%3°, %4=%5")
                             .arg(ix.spec_tag)
                             .arg(QString::fromStdString(PRECISION.fmtComplex(ix.pt)))
                             .arg(QString::fromStdString(PRECISION.fmt(def_d, true)))
+                            .arg(param_sym)
                             .arg(ev_s.at_zero ? "Inf" : QString::fromStdString(PRECISION.fmt(ix.gain_k)));
                     } else {
-                        txt = QString("[%1] K=%2, ωn=%3")
+                        txt = QString("[%1] %2=%3, ωn=%4")
                             .arg(ix.spec_tag)
+                            .arg(param_sym)
                             .arg(QString::fromStdString(PRECISION.fmt(ix.gain_k)))
                             .arg(QString::fromStdString(PRECISION.fmt(ix.wn)));
                     }
@@ -577,7 +638,7 @@ protected:
                     p.drawText(box, Qt::AlignCenter, txt);
                 }
             }
-            
+
             // 4. Draw Live Gain K Closed-Loop Poles (■)
             if (show_live_k_poles && !live_cl_poles.empty()) {
                 for (const auto& cp : live_cl_poles) {
@@ -589,8 +650,9 @@ protected:
                     if (cp.imag() >= -1e-4) {
                         p.setPen(QColor(Theme::ACCENT_PID));
                         p.setFont(QFont("Monospace", 8, QFont::Bold));
-                        p.drawText(cpx + QPointF(8, 14), QString("s_CL(%1) [K=%2]")
+                        p.drawText(cpx + QPointF(8, 14), QString("s_CL(%1) [%2=%3]")
                             .arg(QString::fromStdString(PRECISION.fmtComplex(cp)))
+                            .arg(param_sym)
                             .arg(QString::fromStdString(PRECISION.fmt(live_k_val))));
                     }
                 }
@@ -757,12 +819,14 @@ protected:
                 // Draw callout label (for upper-half-plane jw crossings and all real breakaway points)
                 if (cp.pt.imag() >= -1e-4) {
                     QString txt = (cp.label_tag == "jω")
-                        ? QString("[jω=±%1j] K=%2, ωn=%1")
+                        ? QString("[jω=±%1j] %2=%3, ωn=%1")
                               .arg(QString::fromStdString(PRECISION.fmt(cp.wn)))
+                              .arg(param_sym)
                               .arg(QString::fromStdString(PRECISION.fmt(cp.gain_k)))
-                        : QString("[%1 s=%2] K=%3")
+                        : QString("[%1 s=%2] %3=%4")
                               .arg(cp.label_tag)
                               .arg(QString::fromStdString(PRECISION.fmt(cp.pt.real())))
+                              .arg(param_sym)
                               .arg(QString::fromStdString(PRECISION.fmt(cp.gain_k)));
 
                     QColor fg_col = Theme::is_light ? cp.color.darker(135) : cp.color;
@@ -784,9 +848,9 @@ protected:
         if (show_test_point) {
             tp_px = toPx(test_point);
             p.setPen(QPen(QColor("#1e40af"), 1.1, Qt::DotLine));
-            for (const auto& z : zeros) p.drawLine(toPx(z), tp_px);
+            for (const auto& pt : poles) drawClippedLine(p, toPx(pt), tp_px);
             p.setPen(QPen(QColor("#881337"), 1.1, Qt::DotLine));
-            for (const auto& pl : poles) p.drawLine(toPx(pl), tp_px);
+            for (const auto& zt : zeros) drawClippedLine(p, toPx(zt), tp_px);
         }
         
 
