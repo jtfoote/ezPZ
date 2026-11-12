@@ -1318,7 +1318,7 @@ public:
         outer_vl->setContentsMargins(8, 4, 8, 4);
         outer_vl->setSpacing(3);
 
-        // Top line: Row # + Expression Input + Math Preview + (Inline Answer if short)
+        // Top line: Row # + Expression Input + Math Preview + (Inline Answer if it fits)
         auto* top_hl = new QHBoxLayout();
         top_hl->setContentsMargins(0, 0, 0, 0);
         top_hl->setSpacing(6);
@@ -1327,15 +1327,19 @@ public:
         idx_l->setFixedWidth(20);
         idx_l->setStyleSheet("color: #64748b; font-family: Monospace; font-weight: bold; border:none;");
 
-        auto* ed = makeDarkEntry(init_expr, 140);
+        // Do NOT pass 140 to makeDarkEntry (which sets a fixed width); allow full Expanding/Shrinking!
+        auto* ed = makeDarkEntry(init_expr);
         ed->setMinimumWidth(120);
+        ed->setMaximumWidth(QWIDGETSIZE_MAX);
+        ed->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         ed->installEventFilter(this);
 
         auto* math_prev = new MathFormulaWidget("", QColor(Theme::ACCENT_LOCUS), QColor(Theme::BG_PANEL_ALT), 9);
         math_prev->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Minimum);
 
-        // Answer bundle (a/b button + result label) that can sit inline OR drop to line 2
+        // Answer bundle (a/b button + result label) that sits inline OR drops to line 2
         auto* res_cont = new QWidget();
+        res_cont->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
         res_cont->setStyleSheet("background: transparent; border: none;");
         auto* res_hl = new QHBoxLayout(res_cont);
         res_hl->setContentsMargins(0, 0, 0, 0);
@@ -1344,7 +1348,9 @@ public:
         auto* frac_btn = makeActionBtn("a/b", Theme::TEXT_SECONDARY, Theme::BG_PANEL);
         frac_btn->setVisible(false);
         auto* res_l = new QLabel("= —");
-        res_l->setWordWrap(true);
+        // Disable internal word-wrap so `ed` shrinks instead of squishing `res_l` onto 2 internal lines!
+        res_l->setWordWrap(false);
+        res_l->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
         res_l->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 12px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
 
         res_hl->addWidget(frac_btn);
@@ -1355,12 +1361,12 @@ public:
         inline_slot->addWidget(res_cont);
 
         top_hl->addWidget(idx_l);
-        top_hl->addWidget(ed, 1);
+        top_hl->addWidget(ed, 1); // Stretch 1 fills leftover width, but shrinks down to needed text width!
         top_hl->addWidget(math_prev);
         top_hl->addLayout(inline_slot);
         outer_vl->addLayout(top_hl);
 
-        // Second line (hidden unless LaTeX or Answer is wide)
+        // Second line (hidden unless Input + LaTeX + Answer genuinely exceed total row width)
         auto* wrap_w = new QWidget();
         wrap_w->setStyleSheet("background: transparent; border: none;");
         auto* wrap_hl = new QHBoxLayout(wrap_w);
@@ -1474,15 +1480,27 @@ public:
     void evaluateAll() {
         engine.resetConstants();
         engine.syncFromModel();
-        for (auto& r : rows) {
+
+        bool should_autoscroll_active = false;
+
+        for (size_t i = 0; i < rows.size(); ++i) {
+            auto& r = rows[i];
+            int prev_hint_h = r.frame->sizeHint().height();
+            bool was_wrapped = (r.wrapped_row_w && r.wrapped_row_w->isVisible());
+
             std::string txt = r.edit->text().toStdString();
             if (txt.empty()) {
                 r.math_prev->setVisible(false);
                 r.frac_btn->setVisible(false);
                 r.res_lbl->setText("");
-                if (r.wrapped_row_w) r.wrapped_row_w->setVisible(false);
+                if (r.inline_slot && r.wrapped_slot && r.wrapped_row_w && r.res_container && was_wrapped) {
+                    r.wrapped_slot->removeWidget(r.res_container);
+                    r.inline_slot->addWidget(r.res_container);
+                    r.wrapped_row_w->setVisible(false);
+                }
                 continue;
             }
+
             auto out = engine.evalLine(txt);
             r.math_prev->setVisible(show_latex_preview);
             if (show_latex_preview) {
@@ -1506,24 +1524,59 @@ public:
                 r.res_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 11px; border:none;").arg(Theme::ACCENT_OPEN));
                 r.res_lbl->setText(QString::fromStdString("⚠ " + out.error_msg));
             }
-            // Check if the LaTeX preview + Answer is too wide for a single line
-            int latex_w = (show_latex_preview && r.math_prev->isVisible()) ? r.math_prev->sizeHint().width() : 0;
-            int ans_w   = r.res_lbl->fontMetrics().horizontalAdvance(r.res_lbl->text()) + (r.frac_btn->isVisible() ? 45 : 0);
-            int avail_w = (r.frame->width() > 200) ? r.frame->width() : 520;
 
-            bool needs_wrap = (latex_w + ans_w > avail_w - 190) || (ans_w > 220) || (latex_w > 180);
+            // 1. Measure actual pixel width needed by the typed expression in `r.edit` (plus cursor/padding)
+            int typed_w = r.edit->fontMetrics().horizontalAdvance(r.edit->text()) + 36;
+            int min_edit_w = std::max(140, typed_w);
+
+            // 2. Measure actual pixel width of the LaTeX preview + Answer bundle
+            int latex_w = (show_latex_preview && r.math_prev->isVisible())
+                          ? r.math_prev->sizeHint().width() : 0;
+            int frac_w  = r.frac_btn->isVisible() ? (r.frac_btn->sizeHint().width() + 8) : 0;
+            int ans_w   = r.res_lbl->fontMetrics().horizontalAdvance(r.res_lbl->text()) + 12 + frac_w;
+
+            // 3. Determine real available row width (checking row frame -> tab width -> sensible wide fallback)
+            int avail_w = r.frame->width();
+            if (avail_w <= 200 && this->width() > 260) {
+                avail_w = this->width() - 40;
+            }
+            if (avail_w <= 200) {
+                avail_w = 960;
+            }
+
+            // Row overhead: idx_l (20) + margins (16) + 3 layout spacings (18) + safety buffer (10) = 64px
+            int overhead_w = 64;
+            bool needs_wrap = (min_edit_w + latex_w + ans_w + overhead_w) > avail_w;
+
+            // Keep `r.edit` from being crushed smaller than its typed text if inline,
+            // or let it expand freely on line 1 if the answer wrapped to line 2
+            r.edit->setMinimumWidth(needs_wrap ? 120 : std::min(min_edit_w, std::max(140, avail_w / 2)));
+
             if (r.inline_slot && r.wrapped_slot && r.wrapped_row_w && r.res_container) {
-                r.inline_slot->removeWidget(r.res_container);
-                r.wrapped_slot->removeWidget(r.res_container);
-                if (needs_wrap) {
-                    r.wrapped_slot->addWidget(r.res_container);
-                    r.wrapped_row_w->setVisible(true);
-                } else {
-                    r.inline_slot->addWidget(r.res_container);
-                    r.wrapped_row_w->setVisible(false);
+                if (needs_wrap != was_wrapped) {
+                    r.inline_slot->removeWidget(r.res_container);
+                    r.wrapped_slot->removeWidget(r.res_container);
+                    if (needs_wrap) {
+                        r.wrapped_slot->addWidget(r.res_container);
+                        r.wrapped_row_w->setVisible(true);
+                    } else {
+                        r.inline_slot->addWidget(r.res_container);
+                        r.wrapped_row_w->setVisible(false);
+                    }
+                }
+                // Only enable word-wrap on `res_lbl` if it is ALREADY on line 2 AND wider than the entire row!
+                r.res_lbl->setWordWrap(needs_wrap && (ans_w > avail_w - 40));
+            }
+
+            // Detect if the active row (especially the lowest row) grew taller or wrapped
+            if (r.edit == active_edit && r.edit->hasFocus()) {
+                int new_hint_h = r.frame->sizeHint().height();
+                if ((needs_wrap && !was_wrapped) || new_hint_h > prev_hint_h || i + 1 == rows.size()) {
+                    should_autoscroll_active = true;
                 }
             }
         }
+
         live_vars_lbl->setText(QString(
             "Live Vars: ζ=%1, ωn=%2, ωd=%3, σd=%4 | Kp=%5, Ki=%6, Kd=%7 | Ts=%8s"
         ).arg(QString::fromStdString(PRECISION.fmt(engine.vars["zeta"].real())))
@@ -1531,6 +1584,14 @@ public:
          .arg(QString::fromStdString(PRECISION.fmt(engine.vars["wd"].real())))
          .arg(QString::fromStdString(PRECISION.fmt(engine.vars["sigma_d"].real())))
          .arg(model->kp).arg(model->ki).arg(model->kd).arg(model->ts));
+
+        // Deferred layout activation + scroll so Qt finishes resizing the wrapped/tall row BEFORE scrolling!
+        if (should_autoscroll_active) {
+            QTimer::singleShot(0, this, [this]() {
+                if (rows_layout) rows_layout->activate();
+                scrollToActiveRow();
+            });
+        }
     }
 
     QStringList getExpressions() const {
@@ -1548,6 +1609,16 @@ public:
         active_edit = nullptr;
         for (const QString& ex : list) addRow(ex, false);
         evaluateAll();
+    }
+protected:
+    void resizeEvent(QResizeEvent* ev) override {
+        QWidget::resizeEvent(ev);
+        evaluateAll();
+    }
+
+    void showEvent(QShowEvent* ev) override {
+        QWidget::showEvent(ev);
+        QTimer::singleShot(0, this, [this]() { evaluateAll(); });
     }
 };
 
