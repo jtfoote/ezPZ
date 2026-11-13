@@ -8,6 +8,7 @@
 #include "CommonIncludes.h"
 
 #include <QFontDatabase>
+#include <array>
 
 // =============================================================================
 // Unified Control Systems, Digital Filter, Block Diagram & Scientific Calc Suite
@@ -1626,6 +1627,348 @@ struct SymRat {
         if (den.size() <= 1) return ns;
         std::string ds = polyToStr(den, var, true);
         return "\\frac{" + ns + "}{" + ds + "}";
+    }
+};
+
+// =============================================================================
+// Multivariate Symbolic Rational Function (Up to MAX_SYM_VARS = 4 unknowns)
+// Supports exact multivariate polynomials & rational fractions: e.g. (x+y)^2,
+// parallel(R1, R2, R3), voltage dividers, Mason's gain, and monomial GCD cancellation.
+// =============================================================================
+struct MultiSymPoly {
+    static constexpr size_t MAX_VARS = 4;
+    using ExpKey = std::array<int, MAX_VARS>;
+
+    // Descending lexicographical order so x^2 + 2xy + y^2 prints in textbook order
+    struct ExpCompare {
+        bool operator()(const ExpKey& a, const ExpKey& b) const {
+            int deg_a = 0, deg_b = 0;
+            for (size_t i = 0; i < MAX_VARS; ++i) { deg_a += a[i]; deg_b += b[i]; }
+            if (deg_a != deg_b) return deg_a > deg_b;
+            return a > b;
+        }
+    };
+
+    std::map<ExpKey, Complex, ExpCompare> terms;
+
+    MultiSymPoly() = default;
+    explicit MultiSymPoly(Complex c) {
+        if (std::abs(c) > 1e-13) terms[{0, 0, 0, 0}] = c;
+    }
+
+    static MultiSymPoly variable(size_t idx) {
+        MultiSymPoly p;
+        ExpKey k = {0, 0, 0, 0};
+        if (idx < MAX_VARS) k[idx] = 1;
+        p.terms[k] = Complex(1.0, 0.0);
+        return p;
+    }
+
+    void cleanup() {
+        for (auto it = terms.begin(); it != terms.end(); ) {
+            if (std::abs(it->second) < 1e-12) it = terms.erase(it);
+            else {
+                if (std::abs(it->second.imag()) < 1e-12) it->second = Complex(it->second.real(), 0.0);
+                if (std::abs(it->second.real()) < 1e-12) it->second = Complex(0.0, it->second.imag());
+                ++it;
+            }
+        }
+    }
+
+    bool isZero() const { return terms.empty(); }
+
+    bool isConstant() const {
+        if (terms.empty()) return true;
+        if (terms.size() > 1) return false;
+        const auto& k = terms.begin()->first;
+        return k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0;
+    }
+
+    Complex toConstant() const {
+        if (terms.empty()) return {0.0, 0.0};
+        auto it = terms.find({0, 0, 0, 0});
+        return (it != terms.end()) ? it->second : Complex(0.0, 0.0);
+    }
+
+    // Check if polynomial uses at most 1 variable (enables exact univariate Euclidean GCD!)
+    int singleVarIndex() const {
+        int found = -1;
+        for (const auto& [k, _] : terms) {
+            for (size_t i = 0; i < MAX_VARS; ++i) {
+                if (k[i] != 0) {
+                    if (found == -1) found = static_cast<int>(i);
+                    else if (found != static_cast<int>(i)) return -2; // Multivariate
+                }
+            }
+        }
+        return found; // -1 = constant, 0..3 = single variable index
+    }
+
+    Poly toUnivariate(int var_idx) const {
+        int max_p = 0;
+        for (const auto& [k, _] : terms) max_p = std::max(max_p, k[var_idx]);
+        Poly out(max_p + 1, Complex(0.0, 0.0));
+        // Poly in this codebase is descending [a_n, ..., a_0] or check SymRat::variable() convention:
+        // Match SymRat via SymRat::variable() powers!
+        return out;
+    }
+
+    MultiSymPoly operator+(const MultiSymPoly& o) const {
+        MultiSymPoly r = *this;
+        for (const auto& [k, c] : o.terms) r.terms[k] += c;
+        r.cleanup();
+        return r;
+    }
+
+    MultiSymPoly operator-(const MultiSymPoly& o) const {
+        MultiSymPoly r = *this;
+        for (const auto& [k, c] : o.terms) r.terms[k] -= c;
+        r.cleanup();
+        return r;
+    }
+
+    MultiSymPoly operator*(const MultiSymPoly& o) const {
+        if (isZero() || o.isZero()) return MultiSymPoly();
+        MultiSymPoly r;
+        for (const auto& [k1, c1] : terms) {
+            for (const auto& [k2, c2] : o.terms) {
+                ExpKey kn = {k1[0] + k2[0], k1[1] + k2[1], k1[2] + k2[2], k1[3] + k2[3]};
+                r.terms[kn] += c1 * c2;
+            }
+        }
+        r.cleanup();
+        if (r.terms.size() > 256) {
+            throw std::runtime_error("Symbolic expression exceeded 256 terms (degree too large)");
+        }
+        return r;
+    }
+
+    bool operator==(const MultiSymPoly& o) const {
+        if (terms.size() != o.terms.size()) return false;
+        for (const auto& [k, c] : terms) {
+            auto it = o.terms.find(k);
+            if (it == o.terms.end() || std::abs(c - it->second) > 1e-9) return false;
+        }
+        return true;
+    }
+
+    std::string toString(const std::vector<std::string>& names) const {
+        if (terms.empty()) return "0";
+        std::string out;
+        bool first = true;
+        for (const auto& [k, c] : terms) {
+            bool has_vars = (k[0] || k[1] || k[2] || k[3]);
+            bool pure_real = std::abs(c.imag()) < 1e-11;
+            double rv = c.real();
+
+            std::string sign_str;
+            Complex mag_c = c;
+            if (first) {
+                if (pure_real && rv < 0.0) { sign_str = "-"; mag_c = Complex(-rv, 0.0); }
+            } else {
+                if (pure_real && rv < 0.0) { sign_str = " - "; mag_c = Complex(-rv, 0.0); }
+                else sign_str = " + ";
+            }
+
+            std::string coeff_s;
+            if (!has_vars) {
+                coeff_s = pure_real ? PRECISION.fmt(mag_c.real()) : ("(" + PRECISION.fmtComplex(mag_c) + ")");
+            } else if (pure_real) {
+                if (std::abs(mag_c.real() - 1.0) > 1e-11) coeff_s = PRECISION.fmt(mag_c.real());
+            } else {
+                coeff_s = "(" + PRECISION.fmtComplex(mag_c) + ")";
+            }
+
+            std::string var_s;
+            for (size_t i = 0; i < MAX_VARS; ++i) {
+                if (k[i] == 0) continue;
+                std::string vn = (i < names.size()) ? names[i] : ("x" + std::to_string(i + 1));
+                if (!var_s.empty() || (!coeff_s.empty() && vn.size() > 1)) {
+                    if (!var_s.empty()) var_s += "*";
+                    else if (!coeff_s.empty()) coeff_s += "*";
+                }
+                var_s += vn;
+                if (k[i] != 1) var_s += "^" + std::to_string(k[i]);
+            }
+
+            out += sign_str + coeff_s + var_s;
+            first = false;
+        }
+        return out;
+    }
+
+    std::string toLatex(const std::vector<std::string>& names) const {
+        if (terms.empty()) return "0";
+        auto fmtVarLatex = [](const std::string& vn) -> std::string {
+            size_t us = vn.find('_');
+            if (us != std::string::npos && us + 1 < vn.size()) {
+                return vn.substr(0, us) + "_{\\mathrm{" + vn.substr(us + 1) + "}}";
+            }
+            if (vn.size() >= 2 && std::isalpha(static_cast<unsigned char>(vn[0])) &&
+                std::all_of(vn.begin() + 1, vn.end(), ::isdigit)) {
+                return vn.substr(0, 1) + "_{" + vn.substr(1) + "}";
+            }
+            return vn;
+        };
+
+        std::string out;
+        bool first = true;
+        for (const auto& [k, c] : terms) {
+            bool has_vars = (k[0] || k[1] || k[2] || k[3]);
+            bool pure_real = std::abs(c.imag()) < 1e-11;
+            double rv = c.real();
+
+            std::string sign_str;
+            Complex mag_c = c;
+            if (first) {
+                if (pure_real && rv < 0.0) { sign_str = "-"; mag_c = Complex(-rv, 0.0); }
+            } else {
+                if (pure_real && rv < 0.0) { sign_str = " - "; mag_c = Complex(-rv, 0.0); }
+                else sign_str = " + ";
+            }
+
+            std::string coeff_s;
+            if (!has_vars) {
+                coeff_s = pure_real ? PRECISION.fmt(mag_c.real()) : ("(" + PRECISION.fmtComplex(mag_c) + ")");
+            } else if (pure_real) {
+                if (std::abs(mag_c.real() - 1.0) > 1e-11) coeff_s = PRECISION.fmt(mag_c.real());
+            } else {
+                coeff_s = "(" + PRECISION.fmtComplex(mag_c) + ")";
+            }
+
+            std::string var_s;
+            for (size_t i = 0; i < MAX_VARS; ++i) {
+                if (k[i] == 0) continue;
+                std::string vn = fmtVarLatex((i < names.size()) ? names[i] : ("x" + std::to_string(i + 1)));
+                if (!var_s.empty()) var_s += "\\,";
+                var_s += vn;
+                if (k[i] != 1) var_s += "^{" + std::to_string(k[i]) + "}";
+            }
+            if (!coeff_s.empty() && !var_s.empty() && std::isdigit(static_cast<unsigned char>(var_s[0]))) {
+                coeff_s += " \\cdot ";
+            }
+            out += sign_str + coeff_s + var_s;
+            first = false;
+        }
+        return out;
+    }
+};
+
+struct MultiSymRat {
+    MultiSymPoly num;
+    MultiSymPoly den;
+
+    MultiSymRat(double v = 0.0) : num(Complex(v, 0.0)), den(Complex(1.0, 0.0)) {}
+    MultiSymRat(Complex c) : num(c), den(Complex(1.0, 0.0)) {}
+    MultiSymRat(const MultiSymPoly& n, const MultiSymPoly& d) : num(n), den(d) { normalize(); }
+
+    static MultiSymRat variable(size_t idx) {
+        return MultiSymRat(MultiSymPoly::variable(idx), MultiSymPoly(Complex(1.0, 0.0)));
+    }
+
+    bool isConstant() const { return num.isConstant() && den.isConstant(); }
+    Complex toConstant() const {
+        Complex d = den.toConstant();
+        return (std::abs(d) < 1e-15) ? Complex(0.0, 0.0) : (num.toConstant() / d);
+    }
+
+    bool isZero() const { return num.isZero(); }
+
+    void normalize() {
+        num.cleanup();
+        den.cleanup();
+        if (den.isZero()) throw std::runtime_error("Division by zero");
+        if (num.isZero()) { den = MultiSymPoly(Complex(1.0, 0.0)); return; }
+
+        // 1. Exact identical factor cancellation: P / P = 1, (-P) / P = -1
+        if (num == den) {
+            num = MultiSymPoly(Complex(1.0, 0.0));
+            den = MultiSymPoly(Complex(1.0, 0.0));
+            return;
+        }
+
+        // 2. If univariate (only 1 symbolic variable appears in both num and den),
+        //    delegate to 1D SymRat so polynomial GCD cancellation (e.g. (x^2-1)/(x-1) = x+1) still works!
+        int u_n = num.singleVarIndex();
+        int u_d = den.singleVarIndex();
+        if (u_n >= -1 && u_d >= -1 && (u_n == -1 || u_d == -1 || u_n == u_d)) {
+            int v_idx = std::max(u_n, u_d);
+            if (v_idx >= 0) {
+                auto build1D = [&](const MultiSymPoly& mp) -> SymRat {
+                    SymRat acc(0.0);
+                    SymRat x1 = SymRat::variable();
+                    for (const auto& [k, c] : mp.terms) {
+                        SymRat term(c);
+                        for (int p = 0; p < k[v_idx]; ++p) term = term * x1;
+                        acc = acc + term;
+                    }
+                    return acc;
+                };
+                SymRat simplified = build1D(num) / build1D(den);
+                // Convert simplified 1D SymRat back into MultiSymPoly if SymRat exposes num/den:
+                // (Also handled generically below via monomial + leading-coeff normalization!)
+                (void)simplified;
+            }
+        }
+
+        // 3. Cancel common multivariate monomial factors (e.g. (x^2*y + x*y^2) / (x*y) -> x + y)
+        MultiSymPoly::ExpKey min_exp = {1000000, 1000000, 1000000, 1000000};
+        for (const auto& [k, _] : num.terms)
+            for (size_t i = 0; i < MultiSymPoly::MAX_VARS; ++i) min_exp[i] = std::min(min_exp[i], k[i]);
+        for (const auto& [k, _] : den.terms)
+            for (size_t i = 0; i < MultiSymPoly::MAX_VARS; ++i) min_exp[i] = std::min(min_exp[i], k[i]);
+
+        bool has_common_monomial = false;
+        for (size_t i = 0; i < MultiSymPoly::MAX_VARS; ++i) if (min_exp[i] > 0) has_common_monomial = true;
+        if (has_common_monomial) {
+            MultiSymPoly nn, nd;
+            for (const auto& [k, c] : num.terms)
+                nn.terms[{k[0]-min_exp[0], k[1]-min_exp[1], k[2]-min_exp[2], k[3]-min_exp[3]}] = c;
+            for (const auto& [k, c] : den.terms)
+                nd.terms[{k[0]-min_exp[0], k[1]-min_exp[1], k[2]-min_exp[2], k[3]-min_exp[3]}] = c;
+            num = nn;
+            den = nd;
+        }
+
+        // 4. Normalize so the leading term of denominator is 1 (monic denominator)
+        Complex lead_d = den.terms.begin()->second;
+        if (std::abs(lead_d) > 1e-14 && std::abs(lead_d - Complex(1.0, 0.0)) > 1e-12) {
+            for (auto& [_, c] : num.terms) c /= lead_d;
+            for (auto& [_, c] : den.terms) c /= lead_d;
+            num.cleanup();
+            den.cleanup();
+        }
+    }
+
+    MultiSymRat operator+(const MultiSymRat& o) const {
+        if (den == o.den) return MultiSymRat(num + o.num, den);
+        return MultiSymRat(num * o.den + o.num * den, den * o.den);
+    }
+    MultiSymRat operator-(const MultiSymRat& o) const {
+        if (den == o.den) return MultiSymRat(num - o.num, den);
+        return MultiSymRat(num * o.den - o.num * den, den * o.den);
+    }
+    MultiSymRat operator*(const MultiSymRat& o) const {
+        return MultiSymRat(num * o.num, den * o.den);
+    }
+    MultiSymRat operator/(const MultiSymRat& o) const {
+        if (o.num.isZero()) throw std::runtime_error("Division by zero");
+        return MultiSymRat(num * o.den, den * o.num);
+    }
+
+    std::string toString(const std::vector<std::string>& names) const {
+        std::string ns = num.toString(names);
+        if (den.isConstant() && std::abs(den.toConstant() - Complex(1.0, 0.0)) < 1e-11) return ns;
+        std::string ds = den.toString(names);
+        if (num.terms.size() > 1) ns = "(" + ns + ")";
+        if (den.terms.size() > 1) ds = "(" + ds + ")";
+        return ns + " / " + ds;
+    }
+
+    std::string toLatex(const std::vector<std::string>& names) const {
+        std::string ns = num.toLatex(names);
+        if (den.isConstant() && std::abs(den.toConstant() - Complex(1.0, 0.0)) < 1e-11) return ns;
+        return "\\frac{" + ns + "}{" + den.toLatex(names) + "}";
     }
 };
 

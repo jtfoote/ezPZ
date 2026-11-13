@@ -91,12 +91,16 @@ public:
     bool deg_mode = true;
     std::map<std::string, Complex> vars;
     SharedSystemModel* model = nullptr;
-    std::string active_sym_name = "K";
-    std::map<std::string, SymRat> sym_vars;
+
+    static constexpr size_t MAX_SYM_VARS = 4;
+    std::vector<std::string> sym_names;
+    std::map<std::string, MultiSymRat> sym_vars;
+    bool default_K_only = true;
 
     explicit ScientificCalcEngine(SharedSystemModel* m = nullptr) : model(m) { resetConstants(); }
 
     void resetConstants() {
+        vars.clear();
         vars["pi"]  = Complex(PI, 0.0);
         vars["e"]   = Complex(std::exp(1.0), 0.0);
         vars["tau"] = Complex(2.0 * PI, 0.0);
@@ -104,9 +108,47 @@ public:
         vars["i"]   = Complex(0.0, 1.0);
         vars["j"]   = Complex(0.0, 1.0);
 
-        active_sym_name = "K";
+        sym_names = {"K"};
         sym_vars.clear();
-        sym_vars["K"] = SymRat::variable();
+        sym_vars["K"] = MultiSymRat::variable(0);
+        default_K_only = true;
+    }
+
+    void registerSymVar(const std::string& vname) {
+        if (vname == "pi" || vname == "e" || vname == "i" || vname == "j" || vname == "tau" || vname == "phi") {
+            throw std::runtime_error("Cannot override reserved constant '" + vname + "' as symbolic");
+        }
+        // If user hasn't explicitly declared 'sym K' yet, free up the default 'K' slot first
+        if (default_K_only) {
+            default_K_only = false;
+            if (vname != "K" && sym_vars.size() == 1 && sym_names.size() == 1 && sym_names[0] == "K") {
+                sym_names.clear();
+                sym_vars.clear();
+            }
+        }
+
+        auto it = std::find(sym_names.begin(), sym_names.end(), vname);
+        if (it != sym_names.end()) {
+            size_t idx = static_cast<size_t>(std::distance(sym_names.begin(), it));
+            sym_vars[vname] = MultiSymRat::variable(idx);
+            vars.erase(vname);
+            return;
+        }
+
+        if (sym_names.size() >= MAX_SYM_VARS) {
+            std::string cur_list;
+            for (size_t i = 0; i < sym_names.size(); ++i) {
+                if (i > 0) cur_list += ", ";
+                cur_list += sym_names[i];
+            }
+            throw std::runtime_error("Max " + std::to_string(MAX_SYM_VARS) +
+                                     " simultaneous symbolic variables reached (" + cur_list + ")");
+        }
+
+        size_t idx = sym_names.size();
+        sym_names.push_back(vname);
+        sym_vars[vname] = MultiSymRat::variable(idx);
+        vars.erase(vname);
     }
 
     void syncFromModel() {
@@ -191,24 +233,46 @@ public:
         s_trim.erase(0, s_trim.find_first_not_of(" \t\r\n"));
         if (!s_trim.empty()) s_trim.erase(s_trim.find_last_not_of(" \t\r\n") + 1);
 
-        // Allow "sym x" or "var x" to declare a custom symbolic variable
+        // Allow "sym x", "sym y", or "sym x, y, z" (up to MAX_SYM_VARS = 4 simultaneous symbols)
         if (s_trim.rfind("sym ", 0) == 0 || s_trim.rfind("var ", 0) == 0) {
-            std::string vname = s_trim.substr(4);
-            vname.erase(std::remove_if(vname.begin(), vname.end(), ::isspace), vname.end());
-            if (vname.empty() || !std::isalpha(static_cast<unsigned char>(vname[0]))) {
-                return {false, {0,0}, "", "", s_trim, "Usage: sym <var> (e.g. sym K or sym x)"};
+            std::string rest = s_trim.substr(4);
+            for (char& ch : rest) if (ch == ',') ch = ' ';
+            std::istringstream iss(rest);
+            std::vector<std::string> declared;
+            std::string tok;
+            while (iss >> tok) {
+                if (!std::isalpha(static_cast<unsigned char>(tok[0])) && tok[0] != '_') {
+                    return {false, {0,0}, "", "", s_trim, "Invalid variable name '" + tok + "'"};
+                }
+                for (char ch : tok) {
+                    if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+                        return {false, {0,0}, "", "", s_trim, "Invalid variable name '" + tok + "'"};
+                    }
+                }
+                declared.push_back(tok);
             }
-            active_sym_name = vname;
-            sym_vars.clear();
-            sym_vars[vname] = SymRat::variable();
-            vars.erase(vname);
-            return {true, {0,0}, "= Symbolic (" + vname + ")", "", "\\mathrm{sym}\\; " + vname, ""};
+            if (declared.empty()) {
+                return {false, {0,0}, "", "", s_trim, "Usage: sym <var>  or  sym x, y (max 4)"};
+            }
+            try {
+                for (const auto& vname : declared) registerSymVar(vname);
+            } catch (const std::exception& e) {
+                return {false, {0,0}, "", "", s_trim, e.what()};
+            }
+
+            std::string joined, joined_ltx;
+            for (size_t i = 0; i < declared.size(); ++i) {
+                if (i > 0) { joined += ", "; joined_ltx += ",\\; "; }
+                joined += declared[i];
+                joined_ltx += declared[i];
+            }
+            return {true, {0,0},
+                    "= Symbolic (" + joined + ")  [" + std::to_string(sym_names.size()) + "/4]",
+                    "", "\\mathrm{sym}\\; " + joined_ltx, ""};
         }
 
         // Handle poly_solver(a_n, a_{n-1}, ..., a_0) for arbitrary degree polynomials
         {
-            std::string s_nospace = s_trim;
-            // Support optional variable assignment like: r = poly_solver(2, 4, -7)
             std::string ps_call = s_trim;
             std::string ps_lhs;
             auto eq_p = s_trim.find('=');
@@ -253,7 +317,7 @@ public:
                     for (const auto& astr : arg_strs) {
                         Pos = 0;
                         Src = astr;
-                        SymRat sr = parseE();
+                        MultiSymRat sr = parseE();
                         skip();
                         if (Pos < Src.size()) {
                             throw std::runtime_error(std::string("Unexpected token '") + Src[Pos] + "'");
@@ -322,7 +386,7 @@ public:
 
                         std::string r_name = base_var + std::to_string(i + 1);
                         vars[r_name] = rt;
-                        sym_vars.erase(r_name);
+                        eraseSymBinding(r_name);
 
                         if (i > 0) out_s += " ,  ";
                         out_s += r_name + " = " + PRECISION.fmtComplex(rt);
@@ -332,7 +396,7 @@ public:
                         sym_vars.erase("ans");
                         if (!ps_lhs.empty()) {
                             vars[ps_lhs] = roots[0];
-                            sym_vars.erase(ps_lhs);
+                            eraseSymBinding(ps_lhs);
                         }
                     }
 
@@ -371,7 +435,7 @@ public:
 
         try {
             Pos = 0; Src = s;
-            SymRat sr = parseE();
+            MultiSymRat sr = parseE();
             skip();
             if (Pos < Src.size()) {
                 throw std::runtime_error(std::string("Unexpected token '") + Src[Pos] + "'");
@@ -386,7 +450,7 @@ public:
                 sym_vars.erase("ans");
                 if (!assigned_name.empty()) {
                     vars[assigned_name] = v;
-                    sym_vars.erase(assigned_name);
+                    eraseSymBinding(assigned_name);
                 }
 
                 // Check if the expression was wrapped in hex(...), bin(...), oct(...), or base(...)
@@ -418,14 +482,14 @@ public:
                 return {true, v, dec_s, frac_s, ltx_prev, ""};
             }
 
-            // Case B: Result is a symbolic rational expression in active_sym_name
+            // Case B: Result is a multivariate symbolic rational expression in sym_names
             sym_vars["ans"] = sr;
             if (!assigned_name.empty()) {
                 sym_vars[assigned_name] = sr;
                 vars.erase(assigned_name);
             }
-            std::string sym_dec = prefix + sr.toString(active_sym_name);
-            std::string sym_ltx = (assigned_name.empty() ? "" : (assigned_name + " = ")) + sr.toLatex(active_sym_name);
+            std::string sym_dec = prefix + sr.toString(sym_names);
+            std::string sym_ltx = (assigned_name.empty() ? "" : (assigned_name + " = ")) + sr.toLatex(sym_names);
             return {true, {0.0, 0.0}, sym_dec, "", sym_ltx, ""};
 
         } catch (const std::exception& e) {
@@ -438,26 +502,71 @@ private:
     size_t Pos = 0;
     void skip() { while (Pos < Src.size() && std::isspace(static_cast<unsigned char>(Src[Pos]))) ++Pos; }
 
-    SymRat parseE() {
-        SymRat l = parseT();
+    // Helper: If a symbolic base variable is overwritten with a numeric value (e.g. `x = 5`),
+    // remove `x` from `sym_vars`, compact `sym_names`, and shift variable indices in remaining `sym_vars`!
+    void eraseSymBinding(const std::string& name) {
+        sym_vars.erase(name);
+        auto it = std::find(sym_names.begin(), sym_names.end(), name);
+        if (it == sym_names.end()) return;
+
+        size_t rem_idx = static_cast<size_t>(std::distance(sym_names.begin(), it));
+        sym_names.erase(it);
+
+        // Shift exponent slots > rem_idx left by 1 in any stored derived symbolic expressions
+        auto shiftPoly = [rem_idx](MultiSymPoly& mp, const Complex& num_val) {
+            bool had_rem = false;
+            for (const auto& [k, _] : mp.terms) {
+                if (k[rem_idx] != 0) { had_rem = true; break; }
+            }
+            MultiSymPoly updated;
+            for (const auto& [k, c] : mp.terms) {
+                Complex factor = had_rem ? std::pow(num_val, k[rem_idx]) : Complex(1.0, 0.0);
+                MultiSymPoly::ExpKey nk = {0, 0, 0, 0};
+                size_t dst = 0;
+                for (size_t s = 0; s < MultiSymPoly::MAX_VARS; ++s) {
+                    if (s == rem_idx) continue;
+                    if (dst < MultiSymPoly::MAX_VARS) nk[dst++] = k[s];
+                }
+                updated.terms[nk] += c * factor;
+            }
+            updated.cleanup();
+            mp = updated;
+        };
+
+        Complex sub_val = vars.count(name) ? vars[name] : Complex(0.0, 0.0);
+        for (auto sv_it = sym_vars.begin(); sv_it != sym_vars.end(); ) {
+            shiftPoly(sv_it->second.num, sub_val);
+            shiftPoly(sv_it->second.den, sub_val);
+            sv_it->second.normalize();
+            if (sv_it->second.isConstant() && sv_it->first != "ans") {
+                vars[sv_it->first] = sv_it->second.toConstant();
+                sv_it = sym_vars.erase(sv_it);
+            } else {
+                ++sv_it;
+            }
+        }
+    }
+
+    MultiSymRat parseE() {
+        MultiSymRat l = parseT();
         while (true) {
             skip();
             if (Pos < Src.size() && (Src[Pos] == '+' || Src[Pos] == '-')) {
                 char op = Src[Pos++];
-                SymRat r = parseT();
+                MultiSymRat r = parseT();
                 l = (op == '+') ? (l + r) : (l - r);
             } else break;
         }
         return l;
     }
 
-    SymRat parseT() {
-        SymRat l = parseP();
+    MultiSymRat parseT() {
+        MultiSymRat l = parseP();
         while (true) {
             skip();
             if (Pos < Src.size() && (Src[Pos] == '*' || Src[Pos] == '/')) {
                 char op = Src[Pos++];
-                SymRat r = parseP();
+                MultiSymRat r = parseP();
                 if (op == '/' && r.isZero()) throw std::runtime_error("Division by zero");
                 l = (op == '*') ? (l * r) : (l / r);
             } else if (Pos < Src.size() && (Src[Pos] == '(' || std::isalpha(static_cast<unsigned char>(Src[Pos])))) {
@@ -467,35 +576,38 @@ private:
         return l;
     }
 
-    SymRat parseP() {
-        SymRat b = parseU();
+    MultiSymRat parseP() {
+        MultiSymRat b = parseU();
         skip();
         if (Pos < Src.size() && Src[Pos] == '^') {
             ++Pos;
-            SymRat e = parseU();
+            MultiSymRat e = parseU();
             if (!e.isConstant()) throw std::runtime_error("Exponent must be numeric");
             Complex ec = e.toConstant();
-            if (b.isConstant()) return SymRat(std::pow(b.toConstant(), ec));
+            if (b.isConstant()) return MultiSymRat(std::pow(b.toConstant(), ec));
             int p = static_cast<int>(std::round(ec.real()));
             if (std::abs(ec.imag()) > 1e-9 || std::abs(ec.real() - p) > 1e-7) {
                 throw std::runtime_error("Symbolic base requires an integer exponent");
             }
-            SymRat res(1.0);
+            if (std::abs(p) > 16) {
+                throw std::runtime_error("Symbolic exponent magnitude capped at 16");
+            }
+            MultiSymRat res(1.0);
             for (int i = 0; i < std::abs(p); ++i) res = res * b;
-            return (p >= 0) ? res : (SymRat(1.0) / res);
+            return (p >= 0) ? res : (MultiSymRat(1.0) / res);
         }
         return b;
     }
 
-    SymRat parseU() {
+    MultiSymRat parseU() {
         skip();
         if (Pos < Src.size() && Src[Pos] == '+') { ++Pos; return parseU(); }
-        if (Pos < Src.size() && Src[Pos] == '-') { ++Pos; return SymRat(-1.0) * parseU(); }
+        if (Pos < Src.size() && Src[Pos] == '-') { ++Pos; return MultiSymRat(-1.0) * parseU(); }
         return parseAtom();
     }
 
-    std::vector<SymRat> parseArgList() {
-        std::vector<SymRat> args;
+    std::vector<MultiSymRat> parseArgList() {
+        std::vector<MultiSymRat> args;
         skip();
         if (Pos < Src.size() && Src[Pos] == ')') { ++Pos; return args; }
         while (true) {
@@ -508,13 +620,13 @@ private:
         return args;
     }
 
-    SymRat parseAtom() {
+    MultiSymRat parseAtom() {
         skip();
         if (Pos >= Src.size()) throw std::runtime_error("Incomplete expression");
         if (Src[Pos] == '(' || Src[Pos] == '{') {
             char close_ch = (Src[Pos] == '(') ? ')' : '}';
             ++Pos;
-            SymRat v = parseE();
+            MultiSymRat v = parseE();
             skip();
             if (Pos < Src.size() && Src[Pos] == close_ch) ++Pos;
             return v;
@@ -538,7 +650,7 @@ private:
                     }
                     if (digits.empty()) throw std::runtime_error("Invalid base literal");
                     unsigned long long uval = std::stoull(digits, nullptr, radix);
-                    return SymRat(Complex(static_cast<double>(uval), 0.0));
+                    return MultiSymRat(Complex(static_cast<double>(uval), 0.0));
                 }
             }
             size_t st = Pos;
@@ -553,8 +665,8 @@ private:
                 }
             }
             double v = std::stod(Src.substr(st, Pos - st));
-            if (Pos < Src.size() && (Src[Pos] == 'i' || Src[Pos] == 'j')) { ++Pos; return SymRat(Complex(0.0, v)); }
-            return SymRat(Complex(v, 0.0));
+            if (Pos < Src.size() && (Src[Pos] == 'i' || Src[Pos] == 'j')) { ++Pos; return MultiSymRat(Complex(0.0, v)); }
+            return MultiSymRat(Complex(v, 0.0));
         }
         if (std::isalpha(static_cast<unsigned char>(Src[Pos])) || Src[Pos] == '_') {
             size_t st = Pos;
@@ -570,23 +682,23 @@ private:
                 if (any_sym) {
                     if (name == "parallel" || name == "par") {
                         if (s_args.empty()) throw std::runtime_error("parallel() requires arguments");
-                        SymRat inv_sum(0.0);
+                        MultiSymRat inv_sum(0.0);
                         for (const auto& z : s_args) {
-                            if (z.isZero()) return SymRat(0.0);
-                            inv_sum = inv_sum + (SymRat(1.0) / z);
+                            if (z.isZero()) return MultiSymRat(0.0);
+                            inv_sum = inv_sum + (MultiSymRat(1.0) / z);
                         }
-                        return SymRat(1.0) / inv_sum;
+                        return MultiSymRat(1.0) / inv_sum;
                     }
                     if (name == "sum") {
-                        SymRat tot(0.0);
+                        MultiSymRat tot(0.0);
                         for (const auto& z : s_args) tot = tot + z;
                         return tot;
                     }
                     if (name == "mean" || name == "avg") {
                         if (s_args.empty()) throw std::runtime_error("mean() requires arguments");
-                        SymRat tot(0.0);
+                        MultiSymRat tot(0.0);
                         for (const auto& z : s_args) tot = tot + z;
-                        return tot / SymRat(double(s_args.size()));
+                        return tot / MultiSymRat(double(s_args.size()));
                     }
                     throw std::runtime_error("Function '" + name + "' requires numeric arguments");
                 }
@@ -594,10 +706,10 @@ private:
                 std::vector<Complex> c_args;
                 c_args.reserve(s_args.size());
                 for (const auto& a : s_args) c_args.push_back(a.toConstant());
-                return SymRat(callFunc(name, c_args));
+                return MultiSymRat(callFunc(name, c_args));
             }
             if (sym_vars.count(name)) return sym_vars[name];
-            if (vars.count(name)) return SymRat(vars[name]);
+            if (vars.count(name)) return MultiSymRat(vars[name]);
             throw std::runtime_error("Undefined symbol '" + name + "' (type 'sym " + name + "' to make it symbolic)");
         }
         throw std::runtime_error(std::string("Unexpected token '") + Src[Pos] + "'");
