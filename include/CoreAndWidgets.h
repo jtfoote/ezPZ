@@ -351,7 +351,10 @@ struct PrecisionConfig {
         if (!std::isfinite(val)) return val;
         if (std::abs(val) < 1e-14) return 0.0;
         double scale = std::pow(10.0, decimalsFor(val));
-        return std::round(val * scale) / scale;
+        // Nudge by 1e-12 of a least-significant digit to defeat IEEE-754 binary under-representation
+        // (e.g. 0.577/2 = 0.28849999999999998 -> 0.2885 -> rounds half-away-from-zero to 0.289!)
+        double nudged = val * scale + std::copysign(1e-12, val);
+        return std::round(nudged) / scale;
     }
 
     double step(double val) const {
@@ -363,34 +366,31 @@ struct PrecisionConfig {
         double fval = val.value();
         if (std::isnan(fval)) return "—";
         if (std::isinf(fval)) return (fval > 0) ? (signed_fmt ? "+∞" : "∞") : "-∞";
-        if (std::abs(fval) < 1e-10) fval = 0.0;
+        if (std::abs(fval) < 1e-12) fval = 0.0;
 
         int d = decimalsFor(fval);
         double av = std::abs(fval);
 
-        // Use compact scientific notation for micro-scale (< 1e-4) or large (>= 1e5) values
-        if (av > 0.0 && (av < 1e-4 || av >= 1e5)) {
+        // Use compact scientific notation for micro-scale values (0 < |x| < 1e-4)
+        if (av > 0.0 && av < 1e-4) {
             std::ostringstream s_exp;
             if (signed_fmt && fval >= 0.0) s_exp << "+";
-            s_exp << std::scientific << std::setprecision(std::max(2, d)) << fval;
-            std::string es = s_exp.str();
-            if (strip_zeros || omit_trailing_zeros) {
-                auto e_pos = es.find('e');
-                if (e_pos != std::string::npos && es.find('.') < e_pos) {
-                    std::string mant = es.substr(0, e_pos);
-                    std::string exp_part = es.substr(e_pos);
-                    while (!mant.empty() && mant.back() == '0') mant.pop_back();
-                    if (!mant.empty() && mant.back() == '.') mant.pop_back();
-                    es = mant + exp_part;
-                }
-            }
-            return es;
+            s_exp << std::scientific << std::setprecision(std::max(2, d - 1)) << fval;
+            return s_exp.str();
         }
 
-        // Expand decimal places for small sub-unity values (1e-4 <= |x| < 1) so leading zeros don't eat all sig figs
-        if (av >= 1e-4 && av < 1.0) {
+        // Only add extra decimals if a non-zero number is smaller than the current precision floor
+        // (e.g. 0.000251 at 3 decimals would print as 0.000 without this)
+        if (av >= 1e-4 && av < std::pow(10.0, -d)) {
             int lead_zeros = static_cast<int>(std::floor(-std::log10(av)));
-            d = std::max(d, lead_zeros + std::max(d, 3));
+            d = std::max(d, lead_zeros + 2);
+        }
+
+        // Apply textbook round-half-away-from-zero with IEEE-754 tie protection BEFORE std::fixed!
+        if (fval != 0.0) {
+            double scale = std::pow(10.0, d);
+            fval = std::round(fval * scale + std::copysign(1e-12, fval)) / scale;
+            if (std::abs(fval) < 1e-12) fval = 0.0;
         }
 
         std::ostringstream oss;
