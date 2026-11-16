@@ -70,15 +70,15 @@ jobs:
           elif [ -f "$SRC_DIR/assets/ezpz.svg" ]; then
             cp "$SRC_DIR/assets/ezpz.svg" AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
           else
-            cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-              <rect width="64" height="64" rx="12" fill="#0b0f19"/>
-              <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
-              <path d="M12 48 Q28 8 44 32 T56 20" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
-              <circle cx="24" cy="24" r="4" fill="#ef4444"/>
-              <circle cx="24" cy="40" r="4" fill="#ef4444"/>
-            </svg>
-            SVG
+          cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+            <rect width="64" height="64" rx="12" fill="#0b0f19"/>
+            <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
+            <path d="M12 48 Q28 8 44 32 T56 20" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="24" cy="24" r="4" fill="#ef4444"/>
+            <circle cx="24" cy="40" r="4" fill="#ef4444"/>
+          </svg>
+          SVG
           fi
 
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -125,7 +125,6 @@ jobs:
           chmod +x install.sh
           cp AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg .
 
-          # Bundle AppImage + Start Menu installer together, plus the zero-FUSE portable bundle
           tar -czf ezPZ-Linux-x86_64-Installer.tar.gz ezPZ-Linux-x86_64.AppImage ezpz.svg install.sh
           tar -czf ezPZ-Linux-x86_64-Portable.tar.gz -C AppDir .
 
@@ -142,7 +141,7 @@ jobs:
   # 2. macOS Universal Binary (.dmg & .zip) for Intel + Apple Silicon Macs
   # ---------------------------------------------------------------------------
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -175,7 +174,6 @@ jobs:
           macdeployqt "$APP_PATH" -always-overwrite
           codesign --force --deep --sign - "$APP_PATH"
 
-          # Stage inside a clean folder named ezPZ.app for the DMG & ZIP
           mkdir -p dmg-stage
           cp -R "$APP_PATH" dmg-stage/ezPZ.app
 
