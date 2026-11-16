@@ -1,15 +1,18 @@
-name: Build Linux, macOS & Windows Executables
+name: Build & Release ezPZ
 
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # ... rest of your jobs ...
   # ---------------------------------------------------------------------------
   # 1. Linux Standalone AppImage, Portable Bundle & Start Menu Installer (x86_64)
   # ---------------------------------------------------------------------------
@@ -48,7 +51,6 @@ jobs:
             -DEigen3_DIR="$RUNNER_TEMP/eigen_install/share/eigen3/cmake"
           cmake --build build-linux --config Release --parallel
 
-          # Prepare AppDir structure
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/scalable/apps
           cp build-linux/ezpz AppDir/usr/bin/
 
@@ -58,41 +60,43 @@ jobs:
           Name=ezPZ
           Comment=Interactive Control Systems & DSP Engineering Suite
           Exec=ezpz
-          Icon=ezPZ
+          Icon=ezpz
           Terminal=false
           Categories=Science;Engineering;Education;
           DESKTOP
 
-          # Generate a clean vector icon required by linuxdeploy
-          cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ezPZ.svg
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-            <rect width="64" height="64" rx="12" fill="#0b0f19"/>
-            <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
-            <path d="M12 48 Q28 8 44 32 T56 20" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
-            <circle cx="24" cy="24" r="4" fill="#ef4444"/>
-            <circle cx="24" cy="40" r="4" fill="#ef4444"/>
-          </svg>
-          SVG
+          if [ -f "$SRC_DIR/ezpz.svg" ]; then
+            cp "$SRC_DIR/ezpz.svg" AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
+          elif [ -f "$SRC_DIR/assets/ezpz.svg" ]; then
+            cp "$SRC_DIR/assets/ezpz.svg" AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
+          else
+            cat << 'SVG' > AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+              <rect width="64" height="64" rx="12" fill="#0b0f19"/>
+              <path d="M8 32 H56 M32 8 V56" stroke="#475569" stroke-width="2"/>
+              <path d="M12 48 Q28 8 44 32 T56 20" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round"/>
+              <circle cx="24" cy="24" r="4" fill="#ef4444"/>
+              <circle cx="24" cy="40" r="4" fill="#ef4444"/>
+            </svg>
+            SVG
+          fi
 
-          # Download linuxdeploy and its Qt plugin
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
 
           export QMAKE="$(which qmake6 || which qmake)"
-          export EXTRA_QT_PLUGINS="svg;iconengines;wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration"
+          export EXTRA_QT_PLUGINS="svg;iconengines;tls;wayland-decoration-client;wayland-graphics-integration-client;wayland-shell-integration"
           export LDAI_OUTPUT="ezPZ-Linux-x86_64.AppImage"
 
-          # Run linuxdeploy (using --appimage-extract-and-run for CI compatibility)
           ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
             --appdir AppDir \
             --executable AppDir/usr/bin/ezpz \
             --desktop-file AppDir/usr/share/applications/ezPZ.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/ezPZ.svg \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg \
             --plugin qt \
             --output appimage
 
-          # Create an automatic Start Menu installer script for the target Linux machine
           cat << 'INSTALLER' > install.sh
           #!/usr/bin/env bash
           set -e
@@ -101,7 +105,7 @@ jobs:
 
           cp -f ezPZ-Linux-x86_64.AppImage "$APP_DIR/"
           chmod +x "$APP_DIR/ezPZ-Linux-x86_64.AppImage"
-          cp -f ezPZ.svg "$HOME/.local/share/icons/hicolor/scalable/apps/"
+          cp -f ezpz.svg "$HOME/.local/share/icons/hicolor/scalable/apps/"
 
           cat << EOF > "$HOME/.local/share/applications/ezPZ.desktop"
           [Desktop Entry]
@@ -109,19 +113,20 @@ jobs:
           Name=ezPZ
           Comment=Interactive Control Systems & DSP Engineering Suite
           Exec=$APP_DIR/ezPZ-Linux-x86_64.AppImage
-          Icon=$HOME/.local/share/icons/hicolor/scalable/apps/ezPZ.svg
+          Icon=$HOME/.local/share/icons/hicolor/scalable/apps/ezpz.svg
           Terminal=false
           Categories=Science;Engineering;Education;
           EOF
 
           chmod +x "$HOME/.local/share/applications/ezPZ.desktop"
           update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-          echo "✅ ezPZ installed! You can now launch it from your Start Menu."
+          echo "ezPZ installed! You can now launch it from your Start Menu."
           INSTALLER
           chmod +x install.sh
-          cp AppDir/usr/share/icons/hicolor/scalable/apps/ezPZ.svg .
+          cp AppDir/usr/share/icons/hicolor/scalable/apps/ezpz.svg .
 
-          # Also create a standard .tar.gz portable bundle (in case FUSE isn't installed on the target machine)
+          # Bundle AppImage + Start Menu installer together, plus the zero-FUSE portable bundle
+          tar -czf ezPZ-Linux-x86_64-Installer.tar.gz ezPZ-Linux-x86_64.AppImage ezpz.svg install.sh
           tar -czf ezPZ-Linux-x86_64-Portable.tar.gz -C AppDir .
 
       - name: Upload Linux Artifacts
@@ -130,15 +135,14 @@ jobs:
           name: ezPZ-Linux-x86_64
           path: |
             ezPZ-Linux-x86_64.AppImage
+            ezPZ-Linux-x86_64-Installer.tar.gz
             ezPZ-Linux-x86_64-Portable.tar.gz
-            ezPZ.svg
-            install.sh
 
   # ---------------------------------------------------------------------------
-  # 2. macOS Universal Binary (.dmg & .zip) for Older Intel + Apple Silicon Macs
+  # 2. macOS Universal Binary (.dmg & .zip) for Intel + Apple Silicon Macs
   # ---------------------------------------------------------------------------
   build-macos:
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -166,15 +170,21 @@ jobs:
           cmake --build build-mac --config Release --parallel
 
           APP_PATH="build-mac/ezpz.app"
+          if [ -d "build-mac/ezPZ.app" ]; then APP_PATH="build-mac/ezPZ.app"; fi
+
           macdeployqt "$APP_PATH" -always-overwrite
           codesign --force --deep --sign - "$APP_PATH"
 
+          # Stage inside a clean folder named ezPZ.app for the DMG & ZIP
+          mkdir -p dmg-stage
+          cp -R "$APP_PATH" dmg-stage/ezPZ.app
+
           hdiutil create -volname "ezPZ" \
-            -srcfolder "$APP_PATH" -ov -format UDZO \
+            -srcfolder dmg-stage/ezPZ.app -ov -format UDZO \
             ezPZ-macOS-Universal.dmg
 
           ditto -c -k --sequesterRsrc --keepParent \
-            "$APP_PATH" ezPZ-macOS-Universal-App.zip
+            dmg-stage/ezPZ.app ezPZ-macOS-Universal-App.zip
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
@@ -217,17 +227,48 @@ jobs:
             -DEigen3_DIR="$RUNNER_TEMP/eigen_install/share/eigen3/cmake"
           cmake --build build-win --config Release --parallel
 
-          mkdir -p dist-win
+          mkdir -p ezPZ-Windows-x64
           if [ -f "build-win/Release/ezpz.exe" ]; then
-            cp "build-win/Release/ezpz.exe" dist-win/
+            cp "build-win/Release/ezpz.exe" ezPZ-Windows-x64/
           else
-            cp "build-win/ezpz.exe" dist-win/
+            cp "build-win/ezpz.exe" ezPZ-Windows-x64/
           fi
 
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw dist-win/ezpz.exe
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw ezPZ-Windows-x64/ezpz.exe
+
+      - name: Create Windows Release .zip
+        shell: pwsh
+        run: Compress-Archive -Path ezPZ-Windows-x64/* -DestinationPath ezPZ-Windows-x64.zip
 
       - name: Upload Windows .zip Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ezPZ-Windows-x64
-          path: dist-win/
+          path: ezPZ-Windows-x64.zip
+
+  # ---------------------------------------------------------------------------
+  # 4. Publish GitHub Release Automatically on Version Tags (v*)
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish GitHub Release
+    needs: [ build-linux, build-macos, build-windows ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release and attach binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release-assets/ezPZ-Windows-x64.zip
+            release-assets/ezPZ-macOS-Universal.dmg
+            release-assets/ezPZ-macOS-Universal-App.zip
+            release-assets/ezPZ-Linux-x86_64.AppImage
+            release-assets/ezPZ-Linux-x86_64-Installer.tar.gz
+            release-assets/ezPZ-Linux-x86_64-Portable.tar.gz
