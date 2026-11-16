@@ -3287,6 +3287,13 @@ public:
         h_num_str = "1"; h_den_str = "1";
         h_poles.clear(); h_zeros.clear(); h_gain = 1.0;
 
+        comp_enabled_s = false;
+        c_num_str = "1";
+        c_den_str = "1";
+        c_poles.clear();
+        c_zeros.clear();
+        c_gain = 1.0;
+
         std::tie(z_poles, z_zeros, filter_gain) = DiscreteFilterSimulator::designFilterPreset("butter_lp", 0.25, 0.05);
         discrete_input_magnitude = 1.0;
         ts = 0.05;
@@ -3319,6 +3326,12 @@ public:
         s.setValue("s/unity_fb", unity_feedback_s);
         s.setValue("s/h_num", QString::fromStdString(h_num_str));
         s.setValue("s/h_den", QString::fromStdString(h_den_str));
+        s.setValue("s/comp_enabled", comp_enabled_s);
+        s.setValue("s/c_poles", serializeComplexVec(c_poles));
+        s.setValue("s/c_zeros", serializeComplexVec(c_zeros));
+        s.setValue("s/c_gain", c_gain);
+        s.setValue("s/c_num", QString::fromStdString(c_num_str));
+        s.setValue("s/c_den", QString::fromStdString(c_den_str));
 
         s.setValue("z/poles", serializeComplexVec(z_poles));
         s.setValue("z/zeros", serializeComplexVec(z_zeros));
@@ -3382,6 +3395,12 @@ public:
                 h_gain = pn.leading_gain / std::max(std::abs(pd.leading_gain), 1e-12);
             } catch (...) {}
         }
+        comp_enabled_s = s.value("s/comp_enabled", false).toBool();
+        c_poles        = deserializeComplexVec(s.value("s/c_poles").toString());
+        c_zeros        = deserializeComplexVec(s.value("s/c_zeros").toString());
+        c_gain         = s.value("s/c_gain", 1.0).toDouble();
+        c_num_str      = s.value("s/c_num", "1").toString().toStdString();
+        c_den_str      = s.value("s/c_den", "1").toString().toStdString();
 
         z_poles = deserializeComplexVec(s.value("z/poles").toString());
         z_zeros = deserializeComplexVec(s.value("z/zeros").toString());

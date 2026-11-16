@@ -696,6 +696,9 @@ public:
         tol_edit->setText(QString::number(model->rl_tol_deg, 'g', 3));
         fb_bar->loadFromModelS(model);
         if (comp_card) comp_card->loadFromModelS(model);
+        if (chk_ghost_rl && model->comp_enabled_s) {
+            chk_ghost_rl->setChecked(true);
+        }
         updating_ui = false;
         refreshVaryPoleCombo();
         evaluateCurrent(false);

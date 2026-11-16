@@ -408,10 +408,21 @@ public:
 
     void closeEvent(QCloseEvent* event) override {
         QSettings settings("ControlSuite", "ezPZ");
-        model.saveToSettings(settings);
         settings.setValue("calc/expressions", calc_tab->getExpressions());
         settings.setValue("win/active_tab", stack->currentIndex());
         settings.setValue("win/geometry", saveGeometry());
+
+        if (rl_tab && rl_tab->comp_card) {
+            rl_tab->comp_card->syncToModelS(&model);
+            if (model.comp_enabled_s) {
+                model.syncCompensatorToPidGains();
+            }
+        }
+        if (rl_tab && rl_tab->chk_ghost_rl) {
+            settings.setValue("rl/ghost_rl", rl_tab->chk_ghost_rl->isChecked());
+        }
+        model.saveToSettings(settings);
+
         QMainWindow::closeEvent(event);
     }
 };

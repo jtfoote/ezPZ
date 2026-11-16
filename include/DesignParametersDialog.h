@@ -426,6 +426,9 @@ public:
         });
         connect(solve_c_btn, &QPushButton::clicked, this, onPolyEdited);
 
+        connect(c_num_edit, &QLineEdit::editingFinished, this, onPolyEdited);
+        connect(c_den_edit, &QLineEdit::editingFinished, this, onPolyEdited);
+
         c_poles_card->onValuesChanged = [this]() {
             if (updating) return;
             updating = true;
