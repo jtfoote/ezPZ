@@ -171,8 +171,19 @@ public:
             if (updating) return;
             updating = true;
             p_cards_authoritative = true;
-            h_num_edit->setText(QString::fromStdString(
-                formatPolynomialFromRoots(h_zeros_card->getValues(), domain_var.toStdString())));
+            // Preserve current leading gain in h_num_edit / h_den_edit before reformatting roots
+            double cur_gain = 1.0;
+            try {
+                auto pn = parsePolynomialInput(h_num_edit->text().toStdString());
+                auto pd = parsePolynomialInput(h_den_edit->text().toStdString());
+                if (std::abs(pd.leading_gain) > 1e-12) cur_gain = pn.leading_gain / pd.leading_gain;
+            } catch (...) {}
+            auto z_vals = h_zeros_card->getValues();
+            std::string monic = formatPolynomialFromRoots(z_vals, domain_var.toStdString());
+            if (std::abs(cur_gain - 1.0) > 1e-9) {
+                monic = z_vals.empty() ? PRECISION.fmt(cur_gain) : (PRECISION.fmt(cur_gain) + " * (" + monic + ")");
+            }
+            h_num_edit->setText(QString::fromStdString(monic));
             updating = false;
             if (onChanged) onChanged();
             p_cards_authoritative = false;
@@ -454,23 +465,39 @@ public:
         m->comp_enabled_s = enable_chk->isChecked();
         m->c_num_str = c_num_edit->text().toStdString();
         m->c_den_str = c_den_edit->text().toStdString();
-        m->c_gain    = std::max(0.0, parseNumericInput(kc_edit->text().toStdString(), 1.0));
+        double kc_box = std::max(0.0, parseNumericInput(kc_edit->text().toStdString(), 1.0));
+
         if (p_cards_authoritative) {
             m->c_poles = c_poles_card->getValues();
             m->c_zeros = c_zeros_card->getValues();
+            m->c_gain  = kc_box;
         } else {
             try {
                 auto pn = parsePolynomialInput(m->c_num_str);
                 auto pd = parsePolynomialInput(m->c_den_str);
                 m->c_zeros = pn.roots;
                 m->c_poles = pd.roots;
+
+                double poly_ratio = (std::abs(pd.leading_gain) > 1e-14 && std::abs(pn.leading_gain) > 1e-14)
+                    ? std::abs(pn.leading_gain / pd.leading_gain)
+                    : 1.0;
+                m->c_gain = kc_box * poly_ratio;
+
+                // Normalize Num_c(s) and Den_c(s) to monic so poly_ratio isn't applied twice
+                m->c_num_str = formatPolynomialFromRoots(m->c_zeros, "s");
+                m->c_den_str = formatPolynomialFromRoots(m->c_poles, "s");
+
                 updating = true;
                 c_poles_card->setValues(m->c_poles);
                 c_zeros_card->setValues(m->c_zeros);
+                c_num_edit->setText(QString::fromStdString(m->c_num_str));
+                c_den_edit->setText(QString::fromStdString(m->c_den_str));
+                kc_edit->setText(QString::fromStdString(PRECISION.fmt(m->c_gain)));
                 updating = false;
             } catch (...) {
                 m->c_poles = c_poles_card->getValues();
                 m->c_zeros = c_zeros_card->getValues();
+                m->c_gain  = kc_box;
             }
         }
     }

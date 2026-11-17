@@ -359,7 +359,13 @@ public:
         zeros_card->onValuesChanged = [this]() {
             if (updating_ui) return;
             model->zeros = zeros_card->getValues();
-            num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+            std::string monic_num = formatPolynomialFromRoots(model->zeros, "s");
+            if (std::abs(model->plant_gain - 1.0) > 1e-9) {
+                monic_num = model->zeros.empty()
+                    ? PRECISION.fmt(model->plant_gain)
+                    : (PRECISION.fmt(model->plant_gain) + " * (" + monic_num + ")");
+            }
+            num_edit->setText(QString::fromStdString(monic_num));
             evaluateCurrent(true);
         };
 
@@ -685,8 +691,18 @@ public:
         updating_ui = true;
         poles_card->setValues(model->poles);
         zeros_card->setValues(model->zeros);
-        num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+
+        std::string monic_num = formatPolynomialFromRoots(model->zeros, "s");
+        if (std::abs(model->plant_gain - 1.0) > 1e-9) {
+            if (model->zeros.empty()) {
+                monic_num = PRECISION.fmt(model->plant_gain);
+            } else {
+                monic_num = PRECISION.fmt(model->plant_gain) + " * (" + monic_num + ")";
+            }
+        }
+        num_edit->setText(QString::fromStdString(monic_num));
         den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
+
         if (!is_polar_mode) {
             tp_v1_edit->setText(QString::number(model->test_point.real(), 'g', 4));
             tp_v2_edit->setText(QString::number(model->test_point.imag(), 'g', 4));
@@ -713,9 +729,13 @@ public:
         model->test_point = tp;
         model->rl_tol_deg = tol;
 
-        // Combine G(s) and H(s) poles/zeros
+        // Combine G(s) and H(s) poles/zeros + intrinsic numerator/denominator gain Kg * Kh
         auto raw_loop_poles = model->effectiveLoopPolesS();
         auto raw_loop_zeros = model->effectiveLoopZerosS();
+        double raw_loop_gain = (std::abs(model->plant_gain) > 1e-15) ? model->plant_gain : 1.0;
+        if (!model->unity_feedback_s) {
+            raw_loop_gain *= (std::abs(model->h_gain) > 1e-15) ? model->h_gain : 1.0;
+        }
 
         // ---> IMPROPER CHECK (WITH AUTOMATIC CLEAR WHEN PROPER AGAIN) <---
         if (model->zeros.size() > model->poles.size()) {
@@ -745,11 +765,13 @@ public:
 
         std::vector<Complex> loop_poles = raw_loop_poles;
         std::vector<Complex> loop_zeros = raw_loop_zeros;
+        double eval_gain = raw_loop_gain;
 
         if (is_pole_sweep) {
-            auto eq = buildPoleSweepSystem(raw_loop_poles, raw_loop_zeros, vary_idx, fixed_k0);
+            auto eq = buildPoleSweepSystem(raw_loop_poles, raw_loop_zeros, vary_idx, fixed_k0 * raw_loop_gain);
             loop_poles = eq.eq_poles;
             loop_zeros = eq.eq_zeros;
+            eval_gain  = 1.0; // Swept parameter 'a' multiplies monic D_rem(s) directly
         }
 
         std::string gs_ltx = fb_bar ? fb_bar->formatActiveLatexS(model, false)
@@ -760,8 +782,8 @@ public:
         }
         tf_math_w->setLatex(QString::fromStdString(gs_ltx));
 
-        // Evaluate Root Locus condition on combined loop poles & zeros
-        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, tp, 1.0);
+        // Evaluate Root Locus condition factoring in eval_gain
+        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, tp, eval_gain);
         last_gain = ev.rl_gain_k;
         double def = computeAngleDeficiency(ev.angle_deg);
         bool on_rl = ev.at_pole || ev.at_zero || (std::abs(def) <= tol);
@@ -804,9 +826,11 @@ public:
                      QString::fromStdString(PRECISION.fmt(def, true))));
         }
 
-        // Pass combined loop poles and zeros to the s-plane canvas
+        // Pass combined loop poles, zeros, and loop_gain_factor to the s-plane canvas
         canvas->poles = loop_poles;
         canvas->zeros = loop_zeros;
+        canvas->loop_gain_factor = eval_gain;
+
         // Always keep Ghost RL synced to the uncompensated G(s)H(s)
         canvas->ghost_poles = model->uncompensatedLoopPolesS();
         canvas->ghost_zeros = model->uncompensatedLoopZerosS();
@@ -816,10 +840,8 @@ public:
         canvas->comp_poles = model->comp_enabled_s ? model->c_poles : std::vector<Complex>{};
         canvas->comp_zeros = model->comp_enabled_s ? model->c_zeros : std::vector<Complex>{};
 
-
         canvas->test_point = tp;
         canvas->is_on_rl = on_rl;
-
         canvas->param_sym = is_pole_sweep ? "a" : "K";
 
         // Sync s-Plane Spec Overlay Lines
@@ -842,7 +864,8 @@ public:
             for (size_t i = 0; i < den_p.size(); ++i) den_pad[deg + 1 - den_p.size() + i] = den_p[i];
             for (size_t i = 0; i < num_p.size(); ++i) num_pad[deg + 1 - num_p.size() + i] = num_p[i];
 
-            Poly char_poly = polyAdd(den_pad, polyScale(num_pad, Complex(canvas->live_k_val, 0.0)));
+            double eff_k = canvas->live_k_val * eval_gain;
+            Poly char_poly = polyAdd(den_pad, polyScale(num_pad, Complex(eff_k, 0.0)));
             canvas->live_cl_poles = solvePolynomialRoots(char_poly);
 
             // Closed-loop zeros of T(s) = K*Gc(s)*G(s) / (1 + K*Gc(s)*G(s)*H(s)):

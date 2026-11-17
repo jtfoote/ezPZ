@@ -314,6 +314,7 @@ public:
     std::vector<std::vector<Complex>> cached_branches;
     Complex test_point = {-2.0, 2.0};
     bool is_on_rl = true;
+    double loop_gain_factor = 1.0;
 
     // s-Plane Design Spec Overlays (Ts, Tp, zeta) & Intersections
     bool show_ts_line = false;
@@ -797,7 +798,7 @@ protected:
                 for (const auto& ex : current_intersections) {
                     if (std::abs(ex.pt - x_pt) < 1e-2 * span && ex.spec_tag == tag) return;
                 }
-                auto ev = evaluateTransferFunction(poles, zeros, x_pt, 1.0);
+                auto ev = evaluateTransferFunction(poles, zeros, x_pt, loop_gain_factor);
                 current_intersections.push_back({x_pt, ev.rl_gain_k, std::abs(x_pt), tag, col});
             };
 
@@ -911,7 +912,7 @@ protected:
             bool valid_z  = (show_zeta_line && spec_zeta >= 0.0 && spec_zeta <= 1.0);
 
             auto addSpecTarget = [&](Complex spt, const QString& stag, const QColor& col) {
-                auto ev_t = evaluateTransferFunction(poles, zeros, spt, 1.0);
+                auto ev_t = evaluateTransferFunction(poles, zeros, spt, loop_gain_factor);
                 current_intersections.push_back({spt, ev_t.rl_gain_k, std::abs(spt), stag, col});
             };
 
@@ -962,7 +963,7 @@ protected:
                 if (ix.pt.imag() >= -1e-4) {
                     QString txt;
                     if (is_spec_pair) {
-                        auto ev_s = evaluateTransferFunction(poles, zeros, ix.pt, 1.0);
+                        auto ev_s = evaluateTransferFunction(poles, zeros, ix.pt, loop_gain_factor);
                         double def_d = computeAngleDeficiency(ev_s.angle_deg);
                         txt = QString("[%1] s=%2 | Δθ=%3°, %4=%5")
                             .arg(ix.spec_tag)
@@ -1009,13 +1010,13 @@ protected:
                     Complex d_val = polyVal(D, Complex(sigma, 0.0));
                     if (std::abs(n_val) < 1e-9) continue;
 
-                    double k_here = -(d_val / n_val).real();
+                    double eff_gain = (std::abs(loop_gain_factor) > 1e-15) ? loop_gain_factor : 1.0;
+                    double k_here = -(d_val / n_val).real() / eff_gain;
                     if (k_here <= 1e-6 || !std::isfinite(k_here)) continue;
 
                     // Verify angle condition at sigma + j0
-                    auto ev = evaluateTransferFunction(poles, zeros, Complex(sigma, 0.0), 1.0);
+                    auto ev = evaluateTransferFunction(poles, zeros, Complex(sigma, 0.0), loop_gain_factor);
                     if (!ev.at_pole && std::abs(computeAngleDeficiency(ev.angle_deg)) > 2.0) continue;
-
                     // Deduplicate nearby roots
                     bool dup = false;
                     for (const auto& cp : critical_points) {
@@ -1025,8 +1026,8 @@ protected:
 
                     // Check second derivative / neighbor K to classify Breakaway vs Break-In
                     double eps = 1e-3 * std::max(1.0, std::abs(sigma));
-                    double k_left  = -(polyVal(D, sigma - eps) / polyVal(N, sigma - eps)).real();
-                    double k_right = -(polyVal(D, sigma + eps) / polyVal(N, sigma + eps)).real();
+                    double k_left  = -(polyVal(D, sigma - eps) / polyVal(N, sigma - eps)).real() / eff_gain;
+                    double k_right = -(polyVal(D, sigma + eps) / polyVal(N, sigma + eps)).real() / eff_gain;
                     bool is_break_in = (k_here < k_left && k_here < k_right);
 
                     critical_points.push_back({
@@ -1044,7 +1045,7 @@ protected:
                 auto polishJwCrossing = [&](double w_init, double w_lo, double w_hi) -> std::pair<bool, double> {
                     // On the Root Locus (K > 0), a point s = j*w is on the locus iff angleDeficiency(j*w) == 0.
                     auto angleErr = [&](double w) -> double {
-                        auto ev = evaluateTransferFunction(poles, zeros, Complex(0.0, w), 1.0);
+                        auto ev = evaluateTransferFunction(poles, zeros, Complex(0.0, w), loop_gain_factor);
                         // Signed angle error from ±180 deg in [-180, 180]
                         double err = std::fmod(ev.angle_deg - 180.0, 360.0);
                         if (err <= -180.0) err += 360.0;
@@ -1096,8 +1097,9 @@ protected:
                     Poly N_ol = polyFromRoots(zeros);
                     double d0 = D_ol.back().real();
                     double n0 = N_ol.back().real();
+                    double eff_gain = (std::abs(loop_gain_factor) > 1e-15) ? loop_gain_factor : 1.0;
                     if (std::abs(n0) > 1e-10 && std::abs(d0) > 1e-10) {
-                        double k_orig = -d0 / n0;
+                        double k_orig = -d0 / (n0 * eff_gain);
                         if (k_orig > 1e-6) {
                             addUniqueJw(Complex(0.0, 0.0), k_orig);
                         }
@@ -1120,7 +1122,7 @@ protected:
                             auto [ok, w_exact] = polishJwCrossing(w_guess, w1, w2);
                             double w_final = ok ? w_exact : w_guess;
                             Complex jw_pt(0.0, w_final);
-                            auto ev = evaluateTransferFunction(poles, zeros, jw_pt, 1.0);
+                            auto ev = evaluateTransferFunction(poles, zeros, jw_pt, loop_gain_factor);
                             if (std::isfinite(ev.rl_gain_k) && ev.rl_gain_k > 0.0) {
                                 addUniqueJw(jw_pt, ev.rl_gain_k);
                             }

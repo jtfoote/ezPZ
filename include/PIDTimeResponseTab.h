@@ -42,6 +42,16 @@ public:
         {"tr", 0.34}, {"sigma_d", 2.50}, {"omega_d", 4.88}, {"ess", 0.20}, {"rel_err_pct", 20.0}
     };
 
+    std::string formatScaledPlantNum() const {
+        std::string monic_num = formatPolynomialFromRoots(model->zeros, "s");
+        if (std::abs(model->plant_gain - 1.0) > 1e-9) {
+            return model->zeros.empty()
+                ? PRECISION.fmt(model->plant_gain)
+                : (PRECISION.fmt(model->plant_gain) + " * (" + monic_num + ")");
+        }
+        return monic_num;
+    }
+
     explicit PIDTimeResponseTab(SharedSystemModel* m, QWidget* parent = nullptr)
         : QWidget(parent), model(m)
     {
@@ -258,7 +268,7 @@ public:
         zeros_card->onValuesChanged = [this]() {
             if (updating_ui) return;
             model->zeros = zeros_card->getValues();
-            num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+            num_edit->setText(QString::fromStdString(formatScaledPlantNum()));
             runSimulation(true);
         };
 
@@ -370,7 +380,7 @@ public:
             dlg->show();
         });
 
-        for (auto* ed : {mag_edit, gain_edit, tmax_edit, tol_edit}) {
+        for (auto* ed : {mag_edit, tmax_edit, gain_edit, tol_edit}) {
             connect(ed, &QLineEdit::editingFinished, this, [this]() { runSimulation(true); });
         }
         connect(cursor_edit, &QLineEdit::editingFinished, this, [this]() {
@@ -443,7 +453,6 @@ public:
             double ratio = pn.leading_gain / pd.leading_gain; // Preserves negative sign on -s - 2!
             if (std::abs(ratio) > 1e-12) {
                 model->plant_gain = ratio;
-                gain_edit->setText(QString::number(ratio, 'g', 5));
             }
 
             if (model->zeros.size() > model->poles.size()) {
@@ -470,9 +479,8 @@ public:
         updating_ui = true;
         poles_card->setValues(model->poles);
         zeros_card->setValues(model->zeros);
-        num_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->zeros, "s")));
+        num_edit->setText(QString::fromStdString(formatScaledPlantNum()));
         den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
-        gain_edit->setText(QString::number(model->plant_gain, 'g', 4));
         mag_edit->setText(QString::number(model->input_magnitude, 'g', 4));
         enable_pid_chk->setChecked(model->pid_enabled);
         kp_edit->setText(QString::number(model->kp, 'g', 4));
@@ -481,7 +489,7 @@ public:
         kp_slider->setValue(static_cast<int>(model->kp * 100));
         ki_slider->setValue(static_cast<int>(model->ki * 100));
         kd_slider->setValue(static_cast<int>(model->kd * 100));
-        fb_bar->loadFromModelS(model);
+        if (fb_bar) fb_bar->loadFromModelS(model);
         updating_ui = false;
         updatePidWidgetsState();
         runSimulation(false);
@@ -542,7 +550,10 @@ public:
         if (updating_ui) return;
         cfg.poles = model->poles;
         cfg.zeros = model->zeros;
-        cfg.plant_gain = parseNumericInput(gain_edit->text().toStdString(), 1.0);
+        // Scale the plant's intrinsic numerator factor by Gain K without overwriting model->plant_gain
+        double k_mult = parseNumericInput(gain_edit->text().toStdString(), 1.0);
+        cfg.plant_gain = model->plant_gain * k_mult;
+        cfg.input_magnitude = parseNumericInput(mag_edit->text().toStdString(), 1.0);
 
         bool is_improper = (cfg.zeros.size() > cfg.poles.size());
         if (is_improper) {
@@ -585,7 +596,6 @@ public:
         model->last_sim_result = res;
 
         if (notify) {
-            model->plant_gain = cfg.plant_gain;
             model->input_magnitude = cfg.input_magnitude;
             model->pid_enabled = cfg.pid_enabled;
             model->kp = cfg.kp;
