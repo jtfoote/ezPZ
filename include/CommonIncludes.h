@@ -58,3 +58,11 @@
 #include <QKeySequence>
 #include <QPlainTextEdit>
 #include <QAbstractSpinBox>
+#include <QDesktopServices>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
+#include <QVersionNumber>

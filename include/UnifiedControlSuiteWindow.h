@@ -14,6 +14,9 @@ public:
     // std::vector<QPushButton*> tab_btns;
     QComboBox* tab_combo = nullptr;
 
+    QPushButton* update_btn = nullptr;
+    QString latest_release_url = "https://github.com/jtfoote/ezPZ/releases/latest";
+
     RootLocusTab* rl_tab;
     PIDTimeResponseTab* pid_tab;
     ZPlaneFilterTab* zp_tab;
@@ -109,24 +112,20 @@ public:
         nav_l->addWidget(prev_tab_btn);
         nav_l->addWidget(next_tab_btn);
 
-        // auto stepTabPrev = [this]() {
-        //     if (!stack || stack->count() == 0) return;
-        //     int prev_i = (stack->currentIndex() - 1 + stack->count()) % stack->count();
-        //     switchTab(prev_i);
-        // };
-
-        // auto stepTabNext = [this]() {
-        //     if (!stack || stack->count() == 0) return;
-        //     int next_i = (stack->currentIndex() + 1) % stack->count();
-        //     switchTab(next_i);
-        // };
-
         // Install global event filter on qApp so Alt+Left / Alt+Right always work
         if (qApp) {
             qApp->installEventFilter(this);
         }
 
         nav_l->addStretch();
+
+        update_btn = makeActionBtn("Update Available!", Theme::ACCENT_ZERO, Theme::BG_PANEL);
+        update_btn->setVisible(false);
+        update_btn->setToolTip("A newer release of ezPZ is available on GitHub.");
+        connect(update_btn, &QPushButton::clicked, this, [this]() {
+            QDesktopServices::openUrl(QUrl(latest_release_url));
+        });
+        nav_l->addWidget(update_btn);
 
         auto* sync_btn = makeActionBtn(
             model.sync_enabled ? "🔗 Sync: ON" : "🔓 Sync: OFF",
@@ -248,6 +247,7 @@ public:
         switchTab(last_tab);
 
         applyThemeLive(saved_theme, 0);
+        checkForUpdates();
     }
 
     void activateIndependentTabState(int idx) {
@@ -307,6 +307,56 @@ public:
         calc_tab->evaluateAll();
         cheat_tab->refreshBanner();
         routh_tab->loadFromModel();
+    }
+
+    void checkForUpdates() {
+        auto* nam = new QNetworkAccessManager(this);
+        QNetworkRequest req(QUrl("https://api.github.com/repos/jtfoote/ezPZ/releases/latest"));
+        req.setRawHeader("Accept", "application/vnd.github+json");
+        req.setRawHeader("User-Agent", "ezPZ-Desktop-UpdateChecker");
+        req.setTransferTimeout(5000);
+
+        QNetworkReply* reply = nam->get(req);
+        connect(reply, &QNetworkReply::finished, this, [this, reply, nam]() {
+            reply->deleteLater();
+            nam->deleteLater();
+
+            if (reply->error() != QNetworkReply::NoError) return;
+
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            if (!doc.isObject()) return;
+
+            const QJsonObject obj = doc.object();
+            const QString tag = obj.value("tag_name").toString().trimmed();
+            if (tag.isEmpty()) return;
+
+            const QString clean_remote = (tag.startsWith('v') || tag.startsWith('V'))
+                                        ? tag.mid(1) : tag;
+
+            #ifdef EZPZ_VERSION
+            const QString clean_local = QStringLiteral(EZPZ_VERSION);
+            #else
+            const QString clean_local = QStringLiteral("1.0.0");
+            #endif
+
+            const QVersionNumber remote_ver = QVersionNumber::fromString(clean_remote);
+            const QVersionNumber local_ver  = QVersionNumber::fromString(clean_local);
+
+            if (!remote_ver.isNull() && !local_ver.isNull() && remote_ver > local_ver) {
+                const QString html_url = obj.value("html_url").toString();
+                if (!html_url.isEmpty()) {
+                    latest_release_url = html_url;
+                }
+                if (update_btn) {
+                    update_btn->setText(QString("⬇ Update (%1)").arg(tag));
+                    update_btn->setToolTip(
+                        QString("ezPZ %1 is available (currently running v%2).\nClick to open the GitHub Release page.")
+                            .arg(tag, clean_local)
+                    );
+                    update_btn->setVisible(true);
+                }
+            }
+        });
     }
     
     void applyThemeLive(int target_theme_idx, int source_theme_idx = -1) {

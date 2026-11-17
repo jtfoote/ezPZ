@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ezpz VERSION 1.0.0 LANGUAGES CXX)
+project(ezpz VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,7 +12,7 @@ if(APPLE)
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Build Universal Binary")
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Network)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
 file(GLOB MODULE_SOURCES "src/*.cpp")
@@ -45,8 +45,11 @@ target_link_libraries(ezpz PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Svg
+    Qt6::Network
     Eigen3::Eigen
 )
+
+target_compile_definitions(ezpz PRIVATE EZPZ_VERSION="${PROJECT_VERSION}")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(ezpz PRIVATE -O3 -Wall -Wextra -Wno-unused-lambda-capture)
