@@ -217,6 +217,7 @@ public:
 
         canvas = new TimeResponseCanvas(true);
         attachSvgExportMenu(canvas, "discrete_time_response.svg");
+        attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
         splitter->addWidget(wrapInLeftScroll(left_w, 380));

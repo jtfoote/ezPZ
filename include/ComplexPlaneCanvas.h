@@ -1,6 +1,9 @@
 #pragma once
 #include "CoreAndWidgets.h"
 
+#include <QKeyEvent>
+#include <QNativeGestureEvent>
+
 enum class SecondOrderValidity { None, Valid, Marginal, Invalid };
 
 struct SecondOrderApproxReport {
@@ -367,6 +370,9 @@ public:
     {
         setMinimumSize(420, 360);
         setCursor(Qt::CrossCursor);
+        setFocusPolicy(Qt::ClickFocus);
+        setMouseTracking(true);
+        grabGesture(Qt::PinchGesture);
         resetView();
     }
 
@@ -375,11 +381,63 @@ public:
         update();
     }
 
+    QPointF currentZoomAnchor() const {
+        if (has_cursor_pos && rect().contains(last_cursor_px.toPoint())) {
+            return last_cursor_px;
+        }
+        QPoint local_pt = mapFromGlobal(QCursor::pos());
+        if (rect().contains(local_pt)) {
+            return QPointF(local_pt);
+        }
+        return QPointF(width() * 0.5, height() * 0.5);
+    }
+
+    void zoomAt(double factor, QPointF anchor_px) {
+        if (!user_bounds_set) computeAutoBounds();
+        enforceAspectRatio();
+        user_bounds_set = true;
+
+        Complex anchor = pxToComplex(anchor_px);
+        min_r = anchor.real() - (anchor.real() - min_r) * factor;
+        max_r = anchor.real() + (max_r - anchor.real()) * factor;
+        min_i = anchor.imag() - (anchor.imag() - min_i) * factor;
+        max_i = anchor.imag() + (max_i - anchor.imag()) * factor;
+        update();
+    }
+
+    void zoomKeyboard(bool zoom_in) {
+        zoomAt(zoom_in ? 0.82 : 1.22, currentZoomAnchor());
+    }
+
+    void panByFraction(double frac_r, double frac_i) {
+        if (!user_bounds_set) computeAutoBounds();
+        enforceAspectRatio();
+        user_bounds_set = true;
+        double dr = (max_r - min_r) * frac_r;
+        double di = (max_i - min_i) * frac_i;
+        min_r += dr; max_r += dr;
+        min_i += di; max_i += di;
+        update();
+    }
+
 protected:
     bool user_bounds_set = false;
     double min_r = -5.0, max_r = 1.0, min_i = -3.0, max_i = 3.0;
     QPoint pan_start_px;
     bool panning = false;
+    bool has_cursor_pos = false;
+    QPointF last_cursor_px;
+
+    void enterEvent(QEnterEvent* e) override {
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+        QWidget::enterEvent(e);
+    }
+
+    void leaveEvent(QEvent* e) override {
+        has_cursor_pos = false;
+        QWidget::leaveEvent(e);
+    }
 
     void computeAutoBounds() {
         std::vector<Complex> pts = poles;
@@ -529,7 +587,7 @@ protected:
         double pz_scale = 1.0;
         for (const auto& pt : poles) pz_scale = std::max(pz_scale, std::abs(pt));
         for (const auto& zt : zeros) pz_scale = std::max(pz_scale, std::abs(zt));
-        double max_world_jump = pz_scale * 3.5 + 4.0; // Zoom-independent!
+        double max_world_jump = pz_scale * 3.5 + 4.0; // Zoom-independent
 
         // Grid & Tick Labels (1:1 Square Grid)
         double span = std::min(max_r - min_r, max_i - min_i);
@@ -666,7 +724,7 @@ protected:
                 double pz_scale = 1.0;
                 for (const auto& pt : poles) pz_scale = std::max(pz_scale, std::abs(pt));
                 for (const auto& zt : zeros) pz_scale = std::max(pz_scale, std::abs(zt));
-                // World-space discontinuity threshold (zoom-independent!)
+                // World-space discontinuity threshold (zoom-independent)
                 double max_world_jump = std::max(pz_scale * 8.0, 25.0);
 
                 p.setPen(QPen(QColor(Theme::ACCENT_LOCUS), 2.2));
@@ -813,7 +871,7 @@ protected:
                 QPointF vis_a = p_orig, vis_b = p_up;
                 if (clipLineToScreen(vis_a, vis_b, 0.0)) {
                     p.drawLine(vis_a, vis_b);
-                    // Pin the ζ label onto the visible portion of the ray even when zoomed in!
+                    // Pin the ζ label onto the visible portion of the ray even when zoomed in
                     QPointF lbl_pos = 0.65 * vis_a + 0.35 * vis_b;
                     p.setFont(QFont("Monospace", 8, QFont::Bold));
                     p.drawText(lbl_pos + QPointF(6, -6), QString("ζ=%1 (%OS=%2%)")
@@ -1445,6 +1503,19 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent* e) override {
+        setFocus();
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+        if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton ||
+            (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier))) {
+            if (!user_bounds_set) computeAutoBounds();
+            enforceAspectRatio();
+            user_bounds_set = true;
+            panning = true;
+            pan_start_px = e->pos();
+            setCursor(Qt::ClosedHandCursor);
+            return;
+        }
         if (e->button() == Qt::LeftButton && show_test_point) {
             user_bounds_set = true;
             Complex clicked_pt = pxToComplex(e->pos());
@@ -1476,6 +1547,20 @@ protected:
     }
 
     void mouseMoveEvent(QMouseEvent* e) override {
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+
+        if (panning) {
+            double ew = std::max(1, width() - 48);
+            double eh = std::max(1, height() - 48);
+            double dr = -double(e->pos().x() - pan_start_px.x()) / ew * (max_r - min_r);
+            double di =  double(e->pos().y() - pan_start_px.y()) / eh * (max_i - min_i);
+            min_r += dr; max_r += dr;
+            min_i += di; max_i += di;
+            pan_start_px = e->pos();
+            update();
+            return;
+        }
         if (e->buttons() & Qt::LeftButton) {
             test_point = pxToComplex(e->pos());
             if (onPointSelected) onPointSelected(test_point);
@@ -1497,16 +1582,56 @@ protected:
         setCursor(Qt::CrossCursor);
     }
 
-    void wheelEvent(QWheelEvent* e) override {
-        user_bounds_set = true;
-        double factor = (e->angleDelta().y() > 0) ? 0.82 : 1.22;
-        Complex anchor = pxToComplex(e->position());
-        min_r = anchor.real() - (anchor.real() - min_r) * factor;
-        max_r = anchor.real() + (max_r - anchor.real()) * factor;
-        min_i = anchor.imag() - (anchor.imag() - min_i) * factor;
-        max_i = anchor.imag() + (max_i - anchor.imag()) * factor;
-        update();
+    bool event(QEvent* ev) override {
+        if (ev->type() == QEvent::NativeGesture) {
+            auto* nge = static_cast<QNativeGestureEvent*>(ev);
+            if (nge->gestureType() == Qt::ZoomNativeGesture) {
+                double factor = std::clamp(1.0 - nge->value(), 0.5, 2.0);
+                zoomAt(factor, currentZoomAnchor());
+                return true;
+            }
+        }
+        return QWidget::event(ev);
     }
-    
+
+    void wheelEvent(QWheelEvent* e) override {
+        if (!e->position().isNull() && rect().contains(e->position().toPoint())) {
+            last_cursor_px = e->position();
+            has_cursor_pos = true;
+        }
+        double dy = !e->pixelDelta().isNull()
+            ? (e->pixelDelta().y() * 1.5)
+            : double(e->angleDelta().y());
+        if (std::abs(dy) < 1e-6) return;
+
+        zoomAt(std::pow(0.82, dy / 120.0), currentZoomAnchor());
+        e->accept();
+    }
+
+    void keyPressEvent(QKeyEvent* e) override {
+        switch (e->key()) {
+            case Qt::Key_Plus:
+            case Qt::Key_Equal:
+            case Qt::Key_BracketRight:
+                zoomKeyboard(true); e->accept(); return;
+            case Qt::Key_Minus:
+            case Qt::Key_Underscore:
+            case Qt::Key_BracketLeft:
+                zoomKeyboard(false); e->accept(); return;
+            case Qt::Key_0:
+            case Qt::Key_R:
+                resetView(); e->accept(); return;
+            case Qt::Key_Left:
+                panByFraction(-0.08, 0.0); e->accept(); return;
+            case Qt::Key_Right:
+                panByFraction(0.08, 0.0); e->accept(); return;
+            case Qt::Key_Up:
+                panByFraction(0.0, 0.08); e->accept(); return;
+            case Qt::Key_Down:
+                panByFraction(0.0, -0.08); e->accept(); return;
+            default:
+                QWidget::keyPressEvent(e);
+        }
+    }
 };
 

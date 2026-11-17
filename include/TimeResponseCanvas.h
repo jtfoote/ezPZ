@@ -27,6 +27,8 @@ public:
     {
         setMinimumSize(460, 360);
         setCursor(Qt::CrossCursor);
+        setFocusPolicy(Qt::ClickFocus);
+        grabGesture(Qt::PinchGesture);
         setMouseTracking(true); // Enables hover tooltips & resize-corner cursor feedback
     }
 
@@ -36,12 +38,63 @@ public:
         update();
     }
 
+    QPointF currentZoomAnchor() const {
+        if (has_cursor_pos && rect().contains(last_cursor_px.toPoint())) {
+            return last_cursor_px;
+        }
+        QPoint local_pt = mapFromGlobal(QCursor::pos());
+        if (rect().contains(local_pt)) {
+            return QPointF(local_pt);
+        }
+        double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
+        return QPointF(pad_l + 0.5 * std::max(10.0, width() - pad_l - pad_r),
+                       pad_t + 0.5 * std::max(10.0, height() - pad_t - pad_b));
+    }
+
+    void zoomAt(double factor, QPointF anchor_px) {
+        if (!user_bounds_set) computeAutoBounds();
+        user_bounds_set = true;
+
+        double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
+        double ew = std::max(10.0, width() - pad_l - pad_r);
+        double eh = std::max(10.0, height() - pad_t - pad_b);
+
+        double fx = std::clamp((anchor_px.x() - pad_l) / ew, 0.0, 1.0);
+        double fy = std::clamp((anchor_px.y() - pad_t) / eh, 0.0, 1.0);
+
+        double anchor_x = x_min + fx * (x_max - x_min);
+        double anchor_y = y_max - fy * (y_max - y_min);
+
+        x_min = anchor_x - (anchor_x - x_min) * factor;
+        x_max = anchor_x + (x_max - anchor_x) * factor;
+        y_min = anchor_y - (anchor_y - y_min) * factor;
+        y_max = anchor_y + (y_max - anchor_y) * factor;
+        update();
+    }
+
+    void zoomKeyboard(bool zoom_in) {
+        zoomAt(zoom_in ? 0.85 : 1.18, currentZoomAnchor());
+    }
+
+    void panByFraction(double frac_x, double frac_y) {
+        if (!user_bounds_set) computeAutoBounds();
+        user_bounds_set = true;
+        double dx = (x_max - x_min) * frac_x;
+        double dy = (y_max - y_min) * frac_y;
+        x_min += dx; x_max += dx;
+        y_min += dy; y_max += dy;
+        update();
+    }
+
 protected:
     bool user_bounds_set = false;
     double x_min = 0.0, x_max = 10.0;
     double y_min = -0.2, y_max = 1.5;
     bool panning = false;
     QPoint pan_start_px;
+
+    bool has_cursor_pos = false;
+    QPointF last_cursor_px;
 
     // Resizable Pole-Zero Inset State & Hover Hit-Targets
     bool user_inset_size_set = false;
@@ -464,7 +517,22 @@ protected:
         }
     }
 
+    void enterEvent(QEnterEvent* e) override {
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+        QWidget::enterEvent(e);
+    }
+
+    void leaveEvent(QEvent* e) override {
+        has_cursor_pos = false;
+        QWidget::leaveEvent(e);
+    }
+
     void mousePressEvent(QMouseEvent* e) override {
+        setFocus();
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+
         if (e->button() == Qt::LeftButton && isOnInsetResizeCorner(e->position())) {
             resizing_inset = true;
             user_inset_size_set = true;
@@ -474,19 +542,25 @@ protected:
             setCursor(Qt::SizeBDiagCursor);
             return;
         }
-        if (e->button() == Qt::LeftButton) {
-            if (show_inset && last_inset_rect.contains(e->position())) return;
-            updateCursorFromPx(e->pos().x());
-        } else if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) {
+        if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton ||
+            (e->button() == Qt::LeftButton && (e->modifiers() & Qt::ControlModifier))) {
             if (!user_bounds_set) computeAutoBounds();
             user_bounds_set = true;
             panning = true;
             pan_start_px = e->pos();
             setCursor(Qt::ClosedHandCursor);
+            return;
+        }
+        if (e->button() == Qt::LeftButton) {
+            if (show_inset && last_inset_rect.contains(e->position())) return;
+            updateCursorFromPx(e->pos().x());
         }
     }
 
     void mouseMoveEvent(QMouseEvent* e) override {
+        last_cursor_px = e->position();
+        has_cursor_pos = true;
+
         if (resizing_inset) {
             double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
             double ew = std::max(10.0, width() - pad_l - pad_r);
@@ -499,6 +573,18 @@ protected:
             return;
         }
 
+        if (panning) {
+            double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
+            double ew = std::max(10.0, width() - pad_l - pad_r);
+            double eh = std::max(10.0, height() - pad_t - pad_b);
+            double dx = -double(e->pos().x() - pan_start_px.x()) / ew * (x_max - x_min);
+            double dy =  double(e->pos().y() - pan_start_px.y()) / eh * (y_max - y_min);
+            x_min += dx; x_max += dx;
+            y_min += dy; y_max += dy;
+            pan_start_px = e->pos();
+            update();
+            return;
+        }
         // Hover Tooltip & Resize-Corner Cursor when no mouse button is held
         if (e->buttons() == Qt::NoButton) {
             if (isOnInsetResizeCorner(e->position())) {
@@ -572,26 +658,56 @@ protected:
         setCursor(Qt::CrossCursor);
     }
 
+    bool event(QEvent* ev) override {
+        if (ev->type() == QEvent::NativeGesture) {
+            auto* nge = static_cast<QNativeGestureEvent*>(ev);
+            if (nge->gestureType() == Qt::ZoomNativeGesture) {
+                double factor = std::clamp(1.0 - nge->value(), 0.5, 2.0);
+                zoomAt(factor, currentZoomAnchor());
+                return true;
+            }
+        }
+        return QWidget::event(ev);
+    }
+
     void wheelEvent(QWheelEvent* e) override {
-        if (!user_bounds_set) computeAutoBounds();
-        user_bounds_set = true;
+        if (!e->position().isNull() && rect().contains(e->position().toPoint())) {
+            last_cursor_px = e->position();
+            has_cursor_pos = true;
+        }
+        double dy = !e->pixelDelta().isNull()
+            ? (e->pixelDelta().y() * 1.5)
+            : double(e->angleDelta().y());
+        if (std::abs(dy) < 1e-6) return;
 
-        double pad_l = 52.0, pad_r = 22.0, pad_t = 22.0, pad_b = 36.0;
-        double ew = std::max(10.0, width() - pad_l - pad_r);
-        double eh = std::max(10.0, height() - pad_t - pad_b);
+        zoomAt(std::pow(0.85, dy / 120.0), currentZoomAnchor());
+        e->accept();
+    }
 
-        double factor = (e->angleDelta().y() > 0) ? 0.85 : 1.18;
-        double fx = std::clamp((e->position().x() - pad_l) / ew, 0.0, 1.0);
-        double fy = std::clamp((e->position().y() - pad_t) / eh, 0.0, 1.0);
-
-        double anchor_x = x_min + fx * (x_max - x_min);
-        double anchor_y = y_max - fy * (y_max - y_min);
-
-        x_min = anchor_x - (anchor_x - x_min) * factor;
-        x_max = anchor_x + (x_max - anchor_x) * factor;
-        y_min = anchor_y - (anchor_y - y_min) * factor;
-        y_max = anchor_y + (y_max - anchor_y) * factor;
-        update();
+    void keyPressEvent(QKeyEvent* e) override {
+        switch (e->key()) {
+            case Qt::Key_Plus:
+            case Qt::Key_Equal:
+            case Qt::Key_BracketRight:
+                zoomKeyboard(true); e->accept(); return;
+            case Qt::Key_Minus:
+            case Qt::Key_Underscore:
+            case Qt::Key_BracketLeft:
+                zoomKeyboard(false); e->accept(); return;
+            case Qt::Key_0:
+            case Qt::Key_R:
+                resetView(); e->accept(); return;
+            case Qt::Key_Left:
+                panByFraction(-0.08, 0.0); e->accept(); return;
+            case Qt::Key_Right:
+                panByFraction(0.08, 0.0); e->accept(); return;
+            case Qt::Key_Up:
+                panByFraction(0.0, 0.08); e->accept(); return;
+            case Qt::Key_Down:
+                panByFraction(0.0, -0.08); e->accept(); return;
+            default:
+                QWidget::keyPressEvent(e);
+        }
     }
 
 private:

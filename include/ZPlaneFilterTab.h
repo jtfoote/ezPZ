@@ -212,6 +212,7 @@ public:
 
         canvas = new ComplexPlaneCanvas(true);
         attachSvgExportMenu(canvas, "z_plane_root_locus.svg");
+        attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
         splitter->addWidget(wrapInLeftScroll(left_w, 380));

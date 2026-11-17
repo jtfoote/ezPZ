@@ -336,6 +336,7 @@ public:
 
         canvas = new ComplexPlaneCanvas(false);
         attachSvgExportMenu(canvas, "s_plane_root_locus.svg");
+        attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
         splitter->addWidget(wrapInLeftScroll(left_w, 380));

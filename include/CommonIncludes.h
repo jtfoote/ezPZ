@@ -56,3 +56,5 @@
 #include <vector>
 #include <QShortcut>
 #include <QKeySequence>
+#include <QPlainTextEdit>
+#include <QAbstractSpinBox>

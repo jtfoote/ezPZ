@@ -9,6 +9,7 @@
 
 #include <QFontDatabase>
 #include <array>
+#include <QShortcut>
 
 // =============================================================================
 // Unified Control Systems, Digital Filter, Block Diagram & Scientific Calc Suite
@@ -313,20 +314,121 @@ inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, 
     }
 }
 
+class SvgRightClickMenuFilter : public QObject {
+    QWidget* canvas_;
+    QString default_svg_name_;
+    QPoint press_pos_;
+    bool right_down_ = false;
+    bool dragged_ = false;
+
+public:
+    SvgRightClickMenuFilter(QWidget* canvas, QString svg_name)
+        : QObject(canvas), canvas_(canvas), default_svg_name_(std::move(svg_name)) {}
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* ev) override {
+        (void)obj;
+        if (ev->type() == QEvent::MouseButtonPress) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            if (me->button() == Qt::RightButton) {
+                right_down_ = true;
+                dragged_ = false;
+                press_pos_ = me->pos();
+            }
+        } else if (ev->type() == QEvent::MouseMove && right_down_) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            if ((me->pos() - press_pos_).manhattanLength() > 5) {
+                dragged_ = true;
+            }
+        } else if (ev->type() == QEvent::MouseButtonRelease) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            if (me->button() == Qt::RightButton && right_down_) {
+                bool was_click = !dragged_;
+                right_down_ = false;
+                dragged_ = false;
+                if (was_click) {
+                    QPoint global_pt = me->globalPosition().toPoint();
+                    QTimer::singleShot(0, canvas_, [c = canvas_, name = default_svg_name_, global_pt]() {
+                        QMenu menu(c);
+                        QAction* act_light = menu.addAction("Export SVG (Light Theme for Notes)");
+                        QAction* act_dark  = menu.addAction("Export SVG (Dark Theme)");
+                        QAction* chosen = menu.exec(global_pt);
+                        if (chosen == act_light) {
+                            exportWidgetToSvg(c, name, true);
+                        } else if (chosen == act_dark) {
+                            exportWidgetToSvg(c, name, false);
+                        }
+                    });
+                }
+            }
+        }
+        return false; // Always let the canvas receive press/move/release for panning
+    }
+};
+
 inline void attachSvgExportMenu(QWidget* canvas, const QString& default_svg_name) {
     if (!canvas) return;
-    canvas->setContextMenuPolicy(Qt::CustomContextMenu);
-    QObject::connect(canvas, &QWidget::customContextMenuRequested, canvas, [canvas, default_svg_name](const QPoint& pos) {
-        QMenu menu(canvas);
-        QAction* act_light = menu.addAction("Export SVG (Light Theme)");
-        QAction* act_dark  = menu.addAction("Export SVG (Dark Theme)");
-        QAction* chosen = menu.exec(canvas->mapToGlobal(pos));
-        if (chosen == act_light) {
-            exportWidgetToSvg(canvas, default_svg_name, true);
-        } else if (chosen == act_dark) {
-            exportWidgetToSvg(canvas, default_svg_name, false);
-        }
-    });
+    canvas->setContextMenuPolicy(Qt::PreventContextMenu);
+    canvas->installEventFilter(new SvgRightClickMenuFilter(canvas, default_svg_name));
+}
+
+inline bool isUserTypingInField() {
+    QWidget* fw = QApplication::focusWidget();
+    return qobject_cast<QLineEdit*>(fw) ||
+           qobject_cast<QAbstractSpinBox*>(fw) ||
+           qobject_cast<QTextEdit*>(fw) ||
+           qobject_cast<QPlainTextEdit*>(fw);
+}
+
+template <typename CanvasT>
+inline void attachCanvasZoomShortcuts(QWidget* tab, CanvasT* canvas) {
+    if (!tab || !canvas) return;
+
+    // Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0 work ALWAYS on the active tab (even when typing in a QLineEdit)
+    for (const auto& seq : {QKeySequence(QKeyCombination(Qt::ControlModifier, Qt::Key_Equal)),
+                            QKeySequence(QKeyCombination(Qt::ControlModifier, Qt::Key_Plus))}) {
+        auto* s = new QShortcut(seq, tab);
+        QObject::connect(s, &QShortcut::activated, canvas, [canvas]() { canvas->zoomKeyboard(true); });
+    }
+    auto* s_out = new QShortcut(QKeySequence(QKeyCombination(Qt::ControlModifier, Qt::Key_Minus)), tab);
+    QObject::connect(s_out, &QShortcut::activated, canvas, [canvas]() { canvas->zoomKeyboard(false); });
+
+    auto* s_rst = new QShortcut(QKeySequence(QKeyCombination(Qt::ControlModifier, Qt::Key_0)), tab);
+    QObject::connect(s_rst, &QShortcut::activated, canvas, [canvas]() { canvas->resetView(); });
+
+    // Unmodified zoom keys: '=', '+', ']', '-', '[' (when not typing in a text field)
+    for (auto key : {Qt::Key_Equal, Qt::Key_Plus, Qt::Key_BracketRight}) {
+        auto* s = new QShortcut(QKeySequence(key), tab);
+        QObject::connect(s, &QShortcut::activated, canvas, [canvas]() {
+            if (!isUserTypingInField()) canvas->zoomKeyboard(true);
+        });
+    }
+    for (auto key : {Qt::Key_Minus, Qt::Key_BracketLeft}) {
+        auto* s = new QShortcut(QKeySequence(key), tab);
+        QObject::connect(s, &QShortcut::activated, canvas, [canvas]() {
+            if (!isUserTypingInField()) canvas->zoomKeyboard(false);
+        });
+    }
+
+    // Unmodified reset keys: '0' and 'R'
+    for (auto key : {Qt::Key_0, Qt::Key_R}) {
+        auto* s = new QShortcut(QKeySequence(key), tab);
+        QObject::connect(s, &QShortcut::activated, canvas, [canvas]() {
+            if (!isUserTypingInField()) canvas->resetView();
+        });
+    }
+
+    // Unmodified Arrow keys pan the plot without needing to click it first (Alt+Arrows still switches tabs)
+    auto bindPanKey = [tab, canvas](Qt::Key key, double fx, double fy) {
+        auto* s = new QShortcut(QKeySequence(key), tab);
+        QObject::connect(s, &QShortcut::activated, canvas, [canvas, fx, fy]() {
+            if (!isUserTypingInField()) canvas->panByFraction(fx, fy);
+        });
+    };
+    bindPanKey(Qt::Key_Left,  -0.08,  0.0);
+    bindPanKey(Qt::Key_Right,  0.08,  0.0);
+    bindPanKey(Qt::Key_Up,     0.0,   0.08);
+    bindPanKey(Qt::Key_Down,   0.0,  -0.08);
 }
 
 
