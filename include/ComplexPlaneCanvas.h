@@ -302,6 +302,8 @@ public:
     std::vector<Complex> cached_ghost_zeros;
     std::vector<std::vector<Complex>> cached_ghost_branches;
     bool show_asymp = true;
+    bool has_asymp_centroid = false;
+    Complex asymp_centroid = {0.0, 0.0};
     bool show_unit_circle = false;
     bool show_zgrid = false;
 
@@ -662,12 +664,20 @@ protected:
         }
 
         // Asymptotes
+        has_asymp_centroid = false;
         if (show_asymp && poles.size() != zeros.size()) {
             int diff = static_cast<int>(poles.size()) - static_cast<int>(zeros.size());
             double sum_p = 0.0, sum_z = 0.0;
             for (const auto& pt : poles) sum_p += pt.real();
             for (const auto& zt : zeros) sum_z += zt.real();
             double sigma_a = (sum_p - sum_z) / double(diff);
+            if (std::abs(sigma_a) < 1e-12) sigma_a = 0.0; // Avoid "-0" display
+
+            if (std::abs(diff) >= 2) {
+                has_asymp_centroid = true;
+                asymp_centroid = {sigma_a, 0.0};
+            }
+
             QPointF c_px = toPx({sigma_a, 0.0});
             double rad = farViewRadiusFrom({sigma_a, 0.0});
             p.setPen(QPen(QColor(Theme::ACCENT_ASYMP), 1.3, Qt::DashLine));
@@ -1176,6 +1186,45 @@ protected:
                     p.drawText(box, Qt::AlignCenter, txt);
                 }
             }
+
+            // Draw Asymptote Real-Axis Intercept (σa) Marker & Callout Badge
+            if (has_asymp_centroid) {
+                QPointF apx = toPx(asymp_centroid);
+                if (rect().adjusted(-30, -30, 30, 30).contains(apx.toPoint())) {
+                    QColor acol(Theme::ACCENT_ASYMP);
+
+                    // Target ring + vertical real-axis tick at (σa, 0)
+                    p.setPen(QPen(acol, 1.8));
+                    p.drawLine(apx + QPointF(0, -7.0), apx + QPointF(0, 7.0));
+                    p.setPen(QPen(Qt::white, 1.3));
+                    p.setBrush(acol);
+                    p.drawEllipse(apx, 4.2, 4.2);
+
+                    p.setFont(QFont("Monospace", 8, QFont::Bold));
+                    QString txt = QString("[σa = %1]")
+                        .arg(QString::fromStdString(PRECISION.fmt(asymp_centroid.real())));
+                    QFontMetrics fm(p.font());
+                    int tw = fm.horizontalAdvance(txt) + 10;
+
+                    // Place above the real axis so it never overlaps [Brk-Out]/[Brk-In] below;
+                    // nudge higher if an origin [jω] badge is also sitting near (0, 0).
+                    double y_off = -25.0;
+                    for (const auto& cp : critical_points) {
+                        if (cp.label_tag == "jω" && std::abs(cp.pt - asymp_centroid) < 1e-2 * span) {
+                            y_off = -45.0;
+                            break;
+                        }
+                    }
+
+                    double bx = std::clamp(apx.x() + 8.0, 6.0, std::max(6.0, double(width() - tw - 6)));
+                    QRectF box(bx, apx.y() + y_off, tw, 18);
+                    p.setBrush(Theme::is_light ? QColor(255, 255, 255, 235) : QColor(13, 17, 26, 230));
+                    p.setPen(QPen(acol, 1.1));
+                    p.drawRoundedRect(box, 3, 3);
+                    p.setPen(acol);
+                    p.drawText(box, Qt::AlignCenter, txt);
+                }
+            }
         }
 
         // Vector rays to Test Point
@@ -1534,6 +1583,12 @@ protected:
                 if (std::hypot(e->pos().x() - cpx.x(), e->pos().y() - cpx.y()) <= 12.0) {
                     clicked_pt = cp.pt;
                     break;
+                }
+            }
+            if (!is_z_plane && show_asymp && has_asymp_centroid) {
+                QPointF apx = toPx(asymp_centroid);
+                if (std::hypot(e->pos().x() - apx.x(), e->pos().y() - apx.y()) <= 12.0) {
+                    clicked_pt = asymp_centroid;
                 }
             }
 
