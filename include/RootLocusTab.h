@@ -72,10 +72,11 @@ public:
         auto* poly_l = new QVBoxLayout(poly_card);
         poly_l->setContentsMargins(10, 8, 10, 8);
         auto* poly_hdr = new QHBoxLayout();
-        auto* title_l = new QLabel("Transfer Function  G(s) = Num(s) / Den(s)");
+        auto* title_l = new QLabel("Plant  G(s) = Num(s) / Den(s)");
         title_l->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_ZERO));
         auto* solve_btn = makeActionBtn("Solve Zeros & Poles ➔", Theme::ACCENT_PID);
-        poly_hdr->addWidget(title_l); poly_hdr->addStretch(); poly_hdr->addWidget(solve_btn);
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        poly_hdr->addWidget(title_l, 1); poly_hdr->addWidget(solve_btn);
         poly_l->addLayout(poly_hdr);
 
         auto* pgrid = new QGridLayout();
@@ -89,6 +90,7 @@ public:
 
         poly_status_lbl = new QLabel("Enter s-polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
         poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border: none;").arg(Theme::TEXT_SECONDARY));
+        poly_status_lbl->setWordWrap(true); // prevents forcing card width
         poly_l->addWidget(poly_status_lbl);
 
         // Editable G(s) Poles (×) & G(s) Zeros (○) Tables directly under G(s) Num/Den
@@ -239,7 +241,7 @@ public:
         auto* tp_l = new QVBoxLayout(tp_card);
         tp_l->setContentsMargins(10, 8, 10, 8);
         auto* tp_hdr = new QHBoxLayout();
-        auto* tp_title = new QLabel("Test Point  s  &  Angle Tolerance");
+        auto* tp_title = new QLabel("Test Point  s  & Tolerance");
         tp_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::ACCENT_PID));
         cart_radio  = new QRadioButton("Cartesian"); cart_radio->setChecked(true);
         polar_radio = new QRadioButton("Polar");
@@ -270,6 +272,7 @@ public:
         auto* res_title = new QLabel("Evaluation Results");
         res_title->setStyleSheet(QString("color: %1; font-weight: bold; border: none;").arg(Theme::TEXT_PRIMARY));
         auto* send_btn = makeActionBtn("Send Gain K → PID Simulator ➔", Theme::ACCENT_PID);
+        send_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         res_hdr->addWidget(res_title); res_hdr->addStretch(); res_hdr->addWidget(send_btn);
         res_l->addLayout(res_hdr);
 
@@ -314,35 +317,43 @@ public:
         // Right Plot Canvas
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* plot_hdr = new QHBoxLayout();
-        auto* plot_title = new QLabel("Complex s-Plane Root Locus Diagram");
+
+        auto* plot_top_row = new QHBoxLayout();
+        plot_top_row->setContentsMargins(0, 0, 0, 0);
+        auto* plot_title = new QLabel("Complex s-Plane Root Locus");
         plot_title->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border: none;").arg(Theme::TEXT_PRIMARY));
+        auto* fit_btn = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        fit_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        plot_top_row->addWidget(plot_title);
+        plot_top_row->addStretch();
+        plot_top_row->addWidget(fit_btn);
+        right_l->addLayout(plot_top_row);
+
         auto* chk_rl  = new QCheckBox("Root Locus");   chk_rl->setChecked(true);  chk_rl->setStyleSheet("color: #a855f7; font-weight: bold;");
         auto* chk_as  = new QCheckBox("Asymptotes");   chk_as->setChecked(true);  chk_as->setStyleSheet("color: #22d3ee; font-weight: bold;");
         auto* chk_brk = new QCheckBox("Breakaway");    chk_brk->setChecked(true); chk_brk->setStyleSheet("color: #fb923c; font-weight: bold;");
         auto* chk_jw  = new QCheckBox("jω Crossings"); chk_jw->setChecked(true);  chk_jw->setStyleSheet("color: #38bdf8; font-weight: bold;");
         auto* chk_dep = new QCheckBox("Dep/Arr ∠");    chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
         chk_tp_show   = new QCheckBox("Test Point");   chk_tp_show->setChecked(true); chk_tp_show->setStyleSheet("color: #facc15; font-weight: bold;");
-        auto* fit_btn = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
-        chk_ghost_rl  = new QCheckBox("Ghost RL");  chk_ghost_rl->setChecked(false); chk_ghost_rl->setStyleSheet("color: #94a3b8; font-weight: bold;");
+        chk_ghost_rl  = new QCheckBox("Ghost RL");     chk_ghost_rl->setChecked(false); chk_ghost_rl->setStyleSheet("color: #94a3b8; font-weight: bold;");
         chk_ghost_rl->setToolTip("Pin current Root Locus as a dashed uncompensated reference curve, or compare before/after compensation.");
-        plot_hdr->addWidget(plot_title); plot_hdr->addStretch();
-        plot_hdr->addWidget(chk_ghost_rl);
-        plot_hdr->addWidget(chk_rl); plot_hdr->addWidget(chk_as);
-        plot_hdr->addWidget(chk_brk); plot_hdr->addWidget(chk_jw);
-        plot_hdr->addWidget(chk_dep); plot_hdr->addWidget(chk_tp_show);
-        plot_hdr->addWidget(fit_btn);
-        right_l->addLayout(plot_hdr);
+
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(chk_ghost_rl);
+        chk_flow->addWidget(chk_rl);
+        chk_flow->addWidget(chk_as);
+        chk_flow->addWidget(chk_brk);
+        chk_flow->addWidget(chk_jw);
+        chk_flow->addWidget(chk_dep);
+        chk_flow->addWidget(chk_tp_show);
+        right_l->addLayout(chk_flow);
 
         canvas = new ComplexPlaneCanvas(false);
         attachSvgExportMenu(canvas, "s_plane_root_locus.svg");
         attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 380));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &RootLocusTab::applyPolyNumDen);

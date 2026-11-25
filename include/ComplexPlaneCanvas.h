@@ -371,7 +371,7 @@ public:
     explicit ComplexPlaneCanvas(bool z_mode = false, QWidget* parent = nullptr)
         : QWidget(parent), is_z_plane(z_mode), show_unit_circle(z_mode), show_zgrid(z_mode)
     {
-        setMinimumSize(420, 360);
+        setMinimumSize(260, 260);
         setCursor(Qt::CrossCursor);
         setFocusPolicy(Qt::ClickFocus);
         setMouseTracking(true);
@@ -476,22 +476,28 @@ protected:
 
     void enforceAspectRatio() {
         double pad = 24.0;
-        double ew = std::max(1.0, width() - 2.0 * pad);
-        double eh = std::max(1.0, height() - 2.0 * pad);
+        if (width() < 60 || height() < 60) return; // Ignore transient layout passes
+        double ew = std::max(40.0, width() - 2.0 * pad);
+        double eh = std::max(40.0, height() - 2.0 * pad);
         double span_r = std::max(1e-6, max_r - min_r);
         double span_i = std::max(1e-6, max_i - min_i);
         double mid_r = 0.5 * (min_r + max_r);
         double mid_i = 0.5 * (min_i + max_i);
 
-        // Use a single unified scale (units per pixel) for both X and Y
-        double units_per_px = std::max(span_r / ew, span_i / eh);
-        double new_span_r = units_per_px * ew;
-        double new_span_i = units_per_px * eh;
-
-        min_r = mid_r - 0.5 * new_span_r;
-        max_r = mid_r + 0.5 * new_span_r;
-        min_i = mid_i - 0.5 * new_span_i;
-        max_i = mid_i + 0.5 * new_span_i;
+        if (!user_bounds_set) {
+            // Auto-bounds mode: fit all poles, zeros, and test point inside both axes
+            double units_per_px = std::max(span_r / ew, span_i / eh);
+            min_r = mid_r - 0.5 * units_per_px * ew;
+            max_r = mid_r + 0.5 * units_per_px * ew;
+            min_i = mid_i - 0.5 * units_per_px * eh;
+            max_i = mid_i + 0.5 * units_per_px * eh;
+        } else {
+            // User-panned/zoomed mode: anchor scale to vertical world span so dragging
+            // the horizontal splitter NEVER ratchets the zoom outward!
+            double units_per_px = span_i / eh;
+            min_r = mid_r - 0.5 * units_per_px * ew;
+            max_r = mid_r + 0.5 * units_per_px * ew;
+        }
     }
 
     QPointF toPx(Complex c) const {

@@ -47,10 +47,11 @@ public:
         auto* poly_l = new QVBoxLayout(poly_card);
         poly_l->setContentsMargins(10, 6, 10, 6);
         auto* phdr = new QHBoxLayout();
-        auto* t1 = new QLabel("1. Digital Filter  H(z) = Kd · Num(z) / Den(z)");
+        auto* t1 = new QLabel("1. Filter  H(z) = Kd · Num(z) / Den(z)");
         t1->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ASYMP));
-        auto* solve_btn = makeActionBtn("Solve z-Zeros & z-Poles ➔", Theme::ACCENT_PID);
-        phdr->addWidget(t1); phdr->addStretch(); phdr->addWidget(solve_btn);
+        auto* solve_btn = makeActionBtn("Solve Zeros & Poles ➔", Theme::ACCENT_PID);
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        phdr->addWidget(t1, 1); phdr->addWidget(solve_btn);
         poly_l->addLayout(phdr);
 
         auto* pgrid = new QGridLayout();
@@ -63,6 +64,7 @@ public:
         poly_l->addLayout(pgrid);
 
         poly_status_lbl = new QLabel("Enter Num(z) & Den(z) (e.g. z^2-0.94z+0.33) to auto-compute z-Zeros & z-Poles");
+        poly_status_lbl->setWordWrap(true);
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
@@ -88,8 +90,8 @@ public:
         auto* pid_card = makeCard();
         auto* pid_l = new QVBoxLayout(pid_card);
         pid_l->setContentsMargins(10, 6, 10, 6);
-        auto* mhdr = new QHBoxLayout();
-        auto* t2 = new QLabel("2. Digital Filter H(z), Discrete PID & Input r[k]");
+        auto* mhdr = new FlowLayout(nullptr, 0, 8, 4);
+        auto* t2 = new QLabel("2. Discrete PID & Loop Mode");
         t2->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_PID));
 
         enable_dpid_chk = new QCheckBox("Enable PID C(z)");
@@ -104,14 +106,16 @@ public:
         });
         mode_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 3px; font-weight: bold; font-size: 11px;").arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
 
-        mhdr->addWidget(t2); mhdr->addStretch(); mhdr->addWidget(enable_dpid_chk); mhdr->addWidget(mode_combo);
+        mhdr->addWidget(t2);
+        mhdr->addWidget(enable_dpid_chk);
+        mhdr->addWidget(mode_combo);
         pid_l->addLayout(mhdr);
 
         // Prototype z = e^(s*Ts) & Norm H(1)=1 Bar
-        auto* proto_bar = new QHBoxLayout();
-        proto_zeta_edit = makeDarkEntry("0.707", 45);
-        proto_wn_edit   = makeDarkEntry("15.0", 45);
-        ts_edit         = makeDarkEntry(QString::number(model->ts), 45);
+        auto* proto_bar = new FlowLayout(nullptr, 0, 6, 4);
+        proto_zeta_edit = makeDarkEntry("0.707", 44);
+        proto_wn_edit   = makeDarkEntry("15.0", 44);
+        ts_edit         = makeDarkEntry(QString::number(model->ts), 44);
         auto* set_z_btn = makeActionBtn("Set z = e^(sTs)", Theme::ACCENT_PID);
         auto* norm_btn  = makeActionBtn("Norm H(1)=1", Theme::ACCENT_ZERO);
         auto addP = [&](const QString& lbl, QWidget* w) {
@@ -130,7 +134,7 @@ public:
         auto makeGainCol = [&](const QString& title, QLineEdit*& ed, QSlider*& sl, double max_v) {
             auto* col = new QVBoxLayout();
             auto* lbl = new QLabel(title); lbl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
-            ed = makeDarkEntry("1.0", 60);
+            ed = makeDarkEntry("1.0", 52);
             sl = new QSlider(Qt::Horizontal);
             sl->setRange(0, static_cast<int>(max_v * 100));
             col->addWidget(lbl); col->addWidget(ed); col->addWidget(sl);
@@ -142,14 +146,15 @@ public:
         pid_l->addLayout(gains_grid);
 
         auto* ggrid = new QGridLayout();
+        ggrid->setHorizontalSpacing(4);
         sig_combo = new QComboBox();
         sig_combo->addItems({"Step", "Impulse", "Ramp", "Sine", "Two-Tone"});
         sig_combo->setStyleSheet(mode_combo->styleSheet());
-        mag_edit     = makeDarkEntry("1.0", 48);
-        kd_filt_edit = makeDarkEntry("0.0955", 55);
-        cursor_edit  = makeDarkEntry("15", 45);
-        nsamp_edit   = makeDarkEntry("80", 45);
-        tol_edit     = makeDarkEntry("2.0", 45);
+        mag_edit     = makeDarkEntry("1.0", 40);
+        kd_filt_edit = makeDarkEntry("0.0955", 46);
+        cursor_edit  = makeDarkEntry("15", 38);
+        nsamp_edit   = makeDarkEntry("80", 38);
+        tol_edit     = makeDarkEntry("2.0", 38);
 
         auto addC = [&](int c, const QString& lbl, QWidget* w) {
             auto* l = new QLabel(lbl); l->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
@@ -192,6 +197,7 @@ public:
             vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(t); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
             out = new QLabel("—"); out->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            tl->setWordWrap(true); out->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(out);
             mgrid->addWidget(b, r, c);
         };
@@ -205,25 +211,36 @@ public:
         // Right Plot Canvas
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* r_hdr = new QHBoxLayout();
-        auto* rt = new QLabel("Discrete Time Sequence  y[k]  (L-Click: Sample k • Scroll: Zoom • R-Drag: Pan)");
+
+        auto* plot_top_row = new QHBoxLayout();
+        plot_top_row->setContentsMargins(0, 0, 0, 0);
+        auto* rt = new QLabel("Discrete Time Sequence  y[k]");
+        rt->setToolTip("L-Click: Sample k • Scroll / +/-: Zoom • R-Drag: Pan");
         rt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
+        auto* fit_b = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        fit_b->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        plot_top_row->addWidget(rt);
+        plot_top_row->addStretch();
+        plot_top_row->addWidget(fit_b);
+        right_l->addLayout(plot_top_row);
+
         auto* stems_chk = new QCheckBox("Stems ●");       stems_chk->setChecked(true); stems_chk->setStyleSheet("color: #38bdf8; font-weight: bold;");
         auto* inset_chk = new QCheckBox("z-Plane Inset"); inset_chk->setChecked(true); inset_chk->setStyleSheet("color: #22d3ee; font-weight: bold;");
-        auto* fit_b     = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
-        r_hdr->addWidget(rt); r_hdr->addStretch();
-        r_hdr->addWidget(stems_chk); r_hdr->addWidget(inset_chk); r_hdr->addWidget(fit_b);
-        right_l->addLayout(r_hdr);
+        auto* hint_l    = new QLabel("(L-Click: Sample k • Scroll: Zoom • R-Drag: Pan)");
+        hint_l->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::TEXT_SECONDARY));
+
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(stems_chk);
+        chk_flow->addWidget(inset_chk);
+        chk_flow->addWidget(hint_l);
+        right_l->addLayout(chk_flow);
 
         canvas = new TimeResponseCanvas(true);
         attachSvgExportMenu(canvas, "discrete_time_response.svg");
         attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 380));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &DiscreteTimeResponseTab::applyPolyNumDen);

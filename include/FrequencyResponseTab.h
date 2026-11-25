@@ -227,10 +227,7 @@ public:
         attachCanvasZoomShortcuts(this, canvas);
         rl->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 395));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 410), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &FrequencyResponseTab::applyPolyNumDen);

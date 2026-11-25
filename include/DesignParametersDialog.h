@@ -54,10 +54,10 @@ public:
         vl->setContentsMargins(0, 2, 0, 2);
         vl->setSpacing(3);
 
-        auto* top_r = new QHBoxLayout();
-        auto* lbl = new QLabel(QString("Feedback Path %1(%2):").arg(fb_sym, var_sym));
+        auto* top_r = new FlowLayout(nullptr, 0, 8, 3);
+        auto* lbl = new QLabel(QString("Feedback %1(%2):").arg(fb_sym, var_sym));
         lbl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border: none;");
-        unity_rb  = new QRadioButton(QString("Unity (%1 = 1)").arg(fb_sym));
+        unity_rb  = new QRadioButton(QString("Unity (%1=1)").arg(fb_sym));
         custom_rb = new QRadioButton(QString("Custom %1(%2)").arg(fb_sym, var_sym));
         unity_rb->setChecked(true);
         for (auto* rb : {unity_rb, custom_rb}) {
@@ -68,15 +68,15 @@ public:
         QString fwd_sym = (var_sym == "s") ? "G(s), H(s)" : "H(z), H_fb(z)";
         view_mode_btn = new QPushButton(QString("Formula: %1").arg(fwd_sym));
         view_mode_btn->setCursor(Qt::PointingHandCursor);
+        view_mode_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         view_mode_btn->setStyleSheet(QString(
-            "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: bold; }"
+            "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: bold; }"
             "QPushButton:hover { border-color: %2; }"
         ).arg(Theme::BG_INPUT, Theme::ACCENT_ZERO, Theme::BORDER_INPUT));
 
         top_r->addWidget(lbl);
         top_r->addWidget(unity_rb);
         top_r->addWidget(custom_rb);
-        top_r->addStretch();
         top_r->addWidget(view_mode_btn);
         vl->addLayout(top_r);
 
@@ -89,17 +89,20 @@ public:
         // Tier 1: Num_H and Den_H polynomial inputs
         auto* cr_l = new QHBoxLayout();
         cr_l->setContentsMargins(0, 0, 0, 0);
-        cr_l->setSpacing(6);
+        cr_l->setSpacing(4);
 
-        auto* nh_lbl = new QLabel(QString("Num_%1(%2):").arg(fb_sym, var_sym));
+        auto* nh_lbl = new QLabel(QString("Num_%1:").arg(fb_sym));
         nh_lbl->setStyleSheet("color: #34d399; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
         h_num_edit = makeDarkEntry("1");
+        h_num_edit->setMinimumWidth(45);
 
-        auto* dh_lbl = new QLabel(QString("Den_%1(%2):").arg(fb_sym, var_sym));
+        auto* dh_lbl = new QLabel(QString("Den_%1:").arg(fb_sym));
         dh_lbl->setStyleSheet("color: #a78bfa; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
         h_den_edit = makeDarkEntry("1");
+        h_den_edit->setMinimumWidth(45);
 
         auto* solve_h_btn = makeActionBtn("Solve H ➔", Theme::ACCENT_PID);
+        solve_h_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
 
         cr_l->addWidget(nh_lbl);
         cr_l->addWidget(h_num_edit, 1);
@@ -352,43 +355,49 @@ public:
 
         // Header Row: Title + Enable Checkbox
         auto* hdr = new QHBoxLayout();
-        auto* title = new QLabel("Controller / Compensator  Gc(s) = Kc · Num_c(s) / Den_c(s)");
+        auto* title = new QLabel("Compensator  Gc(s) = Kc · Num_c / Den_c");
         title->setStyleSheet("color: #34d399; font-weight: bold; font-size: 11px; border: none;");
 
         enable_chk = new QCheckBox("Enable Gc(s)");
         enable_chk->setChecked(false);
         enable_chk->setStyleSheet("QCheckBox { color: #34d399; font-weight: bold; font-size: 11px; border: none; }");
 
-        hdr->addWidget(title);
-        hdr->addStretch();
+        hdr->addWidget(title, 1);
         hdr->addWidget(enable_chk);
         vl->addLayout(hdr);
 
-        // Tier 1: Num_c(s), Den_c(s), Kc row (visible, enabled only when checked)
+        // Tier 1: 2-row compact grid so Num_c, Den_c, Kc, and Solve Gc never collide!
         inputs_w = new QWidget();
         inputs_w->setStyleSheet("background: transparent; border: none;");
-        auto* p_row = new QHBoxLayout(inputs_w);
-        p_row->setContentsMargins(0, 2, 0, 0);
-        p_row->setSpacing(6);
+        auto* p_grid = new QGridLayout(inputs_w);
+        p_grid->setContentsMargins(0, 2, 0, 0);
+        p_grid->setHorizontalSpacing(6);
+        p_grid->setVerticalSpacing(4);
 
         auto* nc_l = new QLabel("Num_c(s):");
         nc_l->setStyleSheet("color: #34d399; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
         c_num_edit = makeDarkEntry("1");
+        c_num_edit->setMinimumWidth(50);
 
         auto* dc_l = new QLabel("Den_c(s):");
         dc_l->setStyleSheet("color: #a78bfa; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
         c_den_edit = makeDarkEntry("1");
+        c_den_edit->setMinimumWidth(50);
 
-        auto* kc_l = new QLabel("Kc:");
+        auto* kc_l = new QLabel("Gain Kc:");
         kc_l->setStyleSheet("color: #facc15; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;");
-        kc_edit = makeDarkEntry("1.0", 48);
+        kc_edit = makeDarkEntry("1.0");
+        kc_edit->setMinimumWidth(50);
 
         auto* solve_c_btn = makeActionBtn("Solve Gc ➔", Theme::ACCENT_PID);
+        solve_c_btn->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-        p_row->addWidget(nc_l); p_row->addWidget(c_num_edit, 1);
-        p_row->addWidget(dc_l); p_row->addWidget(c_den_edit, 1);
-        p_row->addWidget(kc_l); p_row->addWidget(kc_edit);
-        p_row->addWidget(solve_c_btn);
+        p_grid->addWidget(nc_l, 0, 0); p_grid->addWidget(c_num_edit, 0, 1);
+        p_grid->addWidget(dc_l, 0, 2); p_grid->addWidget(c_den_edit, 0, 3);
+        p_grid->addWidget(kc_l, 1, 0); p_grid->addWidget(kc_edit,    1, 1);
+        p_grid->addWidget(solve_c_btn, 1, 2, 1, 2);
+        p_grid->setColumnStretch(1, 1);
+        p_grid->setColumnStretch(3, 1);
         vl->addWidget(inputs_w);
 
         // Tier 2: Editable Gc(s) Poles (×) & Zeros (○) Tables (hidden when disabled)

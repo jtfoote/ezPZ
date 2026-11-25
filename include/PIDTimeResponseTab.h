@@ -70,10 +70,11 @@ public:
         auto* poly_l = new QVBoxLayout(poly_card);
         poly_l->setContentsMargins(10, 6, 10, 6);
         auto* poly_hdr = new QHBoxLayout();
-        auto* t1 = new QLabel("1. Plant Transfer Function  G(s) = K · Num(s) / Den(s)");
+        auto* t1 = new QLabel("1. Plant  G(s) = K · Num(s) / Den(s)");
         t1->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         auto* solve_btn = makeActionBtn("Solve ➔", Theme::ACCENT_PID);
-        poly_hdr->addWidget(t1); poly_hdr->addStretch(); poly_hdr->addWidget(solve_btn);
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        poly_hdr->addWidget(t1, 1); poly_hdr->addWidget(solve_btn);
         poly_l->addLayout(poly_hdr);
 
         auto* pgrid = new QGridLayout();
@@ -85,6 +86,7 @@ public:
         pgrid->addWidget(dl, 0, 2); pgrid->addWidget(den_edit, 0, 3);
         poly_l->addLayout(pgrid);
         poly_status_lbl = new QLabel("Type Num(s) & Den(s) (e.g. (s+2)(s+3)) and press Enter.");
+        poly_status_lbl->setWordWrap(true);
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
@@ -117,8 +119,8 @@ public:
         auto* pid_card = makeCard();
         auto* pid_l = new QVBoxLayout(pid_card);
         pid_l->setContentsMargins(10, 6, 10, 6);
-        auto* pid_hdr = new QHBoxLayout();
-        auto* t2 = new QLabel("2. PID Controller & Spec Synthesizer");
+        auto* pid_hdr = new FlowLayout(nullptr, 0, 8, 4);
+        auto* t2 = new QLabel("2. PID & Spec Synthesizer");
         t2->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_PID));
 
         enable_pid_chk = new QCheckBox("Enable PID C(s)");
@@ -134,14 +136,16 @@ public:
         loop_mode_combo->setStyleSheet(QString("background-color: %1; color: %2; border: 1px solid %3; padding: 3px; font-weight: bold; font-size: 11px;")
                                        .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY, Theme::BORDER_INPUT));
 
-        pid_hdr->addWidget(t2); pid_hdr->addStretch(); pid_hdr->addWidget(enable_pid_chk); pid_hdr->addWidget(loop_mode_combo);
+        pid_hdr->addWidget(t2);
+        pid_hdr->addWidget(enable_pid_chk);
+        pid_hdr->addWidget(loop_mode_combo);
         pid_l->addLayout(pid_hdr);
 
-        auto* synth_bar = new QHBoxLayout();
+        auto* synth_bar = new FlowLayout(nullptr, 0, 6, 4);
         auto* l_os = new QLabel("Target %OS:"); l_os->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
-        os_target_edit = makeDarkEntry("20.0", 48);
+        os_target_edit = makeDarkEntry("20.0", 46);
         auto* l_zt = new QLabel("or ζ:"); l_zt->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
-        zeta_target_edit = makeDarkEntry("0.456", 48);
+        zeta_target_edit = makeDarkEntry("0.456", 46);
         auto* design_ctrl_btn = makeActionBtn("Design Controller ➔", "#ffffff", Theme::ACCENT_PID);
         auto* open_params_btn = makeActionBtn("🎛 Design Parameters...", Theme::ACCENT_ZERO);
         synth_bar->addWidget(l_os); synth_bar->addWidget(os_target_edit);
@@ -157,7 +161,7 @@ public:
         auto makeGainCol = [&](const QString& title, QLineEdit*& ed, QSlider*& sl, double max_v) {
             auto* col = new QVBoxLayout();
             auto* lbl = new QLabel(title); lbl->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
-            ed = makeDarkEntry("1.0", 65);
+            ed = makeDarkEntry("1.0", 52);
             sl = new QSlider(Qt::Horizontal);
             sl->setRange(0, static_cast<int>(max_v * 100));
             col->addWidget(lbl); col->addWidget(ed); col->addWidget(sl);
@@ -169,14 +173,15 @@ public:
         pid_l->addLayout(gains_grid);
 
         auto* sim_row = new QGridLayout();
+        sim_row->setHorizontalSpacing(4);
         sig_combo = new QComboBox();
         sig_combo->addItems({"Step", "Impulse", "Ramp", "Sine"});
         sig_combo->setStyleSheet(loop_mode_combo->styleSheet());
-        mag_edit    = makeDarkEntry("1.0", 50);
-        gain_edit   = makeDarkEntry("1.0", 50);
-        cursor_edit = makeDarkEntry("2.5", 50);
-        tmax_edit   = makeDarkEntry("10.0", 50);
-        tol_edit    = makeDarkEntry("2.0", 50);
+        mag_edit    = makeDarkEntry("1.0", 40);
+        gain_edit   = makeDarkEntry("1.0", 40);
+        cursor_edit = makeDarkEntry("2.5", 40);
+        tmax_edit   = makeDarkEntry("10.0", 40);
+        tol_edit    = makeDarkEntry("2.0", 40);
 
         auto addLabeled = [&](int col, const QString& txt, QWidget* w) {
             auto* l = new QLabel(txt); l->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
@@ -216,6 +221,7 @@ public:
             auto* vl = new QVBoxLayout(b);
             vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(title); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
+            tl->setWordWrap(true);
             val_lbl = new QLabel("—"); val_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
             val_lbl->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(val_lbl);
@@ -233,26 +239,38 @@ public:
         // Right Plot Panel
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* plot_hdr = new QHBoxLayout();
-        auto* pt = new QLabel("Time-Domain Response  y(t)  (L-Click: Cursor t • Scroll: Zoom • R-Drag: Pan)");
+
+        auto* plot_top_row = new QHBoxLayout();
+        plot_top_row->setContentsMargins(0, 0, 0, 0);
+        auto* pt = new QLabel("Time-Domain Response  y(t)");
+        pt->setToolTip("L-Click: Move Cursor t • Scroll / +/-: Zoom • R-Drag: Pan");
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
-        chk_ol = new QCheckBox("Overlay Open-Loop"); chk_ol->setStyleSheet("color: #f59e0b; font-weight: bold;");
+        auto* fit_b = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        fit_b->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        plot_top_row->addWidget(pt);
+        plot_top_row->addStretch();
+        plot_top_row->addWidget(fit_b);
+        right_l->addLayout(plot_top_row);
+
+        chk_ol       = new QCheckBox("Overlay Open-Loop"); chk_ol->setStyleSheet("color: #f59e0b; font-weight: bold;");
         auto* chk_u  = new QCheckBox("Control u(t)");      chk_u->setStyleSheet("color: #ff5f56; font-weight: bold;");
         auto* chk_in = new QCheckBox("s-Plane Inset");     chk_in->setChecked(true); chk_in->setStyleSheet("color: #34d399; font-weight: bold;");
-        auto* fit_b  = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
-        plot_hdr->addWidget(pt); plot_hdr->addStretch();
-        plot_hdr->addWidget(chk_ol); plot_hdr->addWidget(chk_u); plot_hdr->addWidget(chk_in); plot_hdr->addWidget(fit_b);
-        right_l->addLayout(plot_hdr);
+        auto* hint_l = new QLabel("(L-Click: Cursor t • Scroll: Zoom • R-Drag: Pan)");
+        hint_l->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::TEXT_SECONDARY));
+
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(chk_ol);
+        chk_flow->addWidget(chk_u);
+        chk_flow->addWidget(chk_in);
+        chk_flow->addWidget(hint_l);
+        right_l->addLayout(chk_flow);
 
         canvas = new TimeResponseCanvas(false);
         attachSvgExportMenu(canvas, "time_response.svg");
         attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 430));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &PIDTimeResponseTab::applyPolyNumDen);

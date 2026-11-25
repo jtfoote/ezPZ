@@ -25,7 +25,7 @@ public:
     explicit TimeResponseCanvas(bool discrete_mode = false, QWidget* parent = nullptr)
         : QWidget(parent), is_discrete(discrete_mode)
     {
-        setMinimumSize(460, 360);
+        setMinimumSize(260, 240);
         setCursor(Qt::CrossCursor);
         setFocusPolicy(Qt::ClickFocus);
         grabGesture(Qt::PinchGesture);

@@ -10,6 +10,8 @@
 #include <QFontDatabase>
 #include <array>
 #include <QShortcut>
+#include <QLayout>
+#include <QStyle>
 
 // =============================================================================
 // Unified Control Systems, Digital Filter, Block Diagram & Scientific Calc Suite
@@ -283,6 +285,78 @@ namespace Theme {
         }
     }
 }
+
+class FlowLayout : public QLayout {
+public:
+    explicit FlowLayout(QWidget* parent = nullptr, int margin = 0, int hSpacing = 8, int vSpacing = 4)
+        : QLayout(parent), m_hSpace(hSpacing), m_vSpace(vSpacing) {
+        setContentsMargins(margin, margin, margin, margin);
+    }
+    ~FlowLayout() override {
+        QLayoutItem* item;
+        while ((item = takeAt(0))) delete item;
+    }
+    void addItem(QLayoutItem* item) override { itemList.append(item); }
+    int horizontalSpacing() const { return m_hSpace >= 0 ? m_hSpace : smartSpacing(QStyle::PM_LayoutHorizontalSpacing); }
+    int verticalSpacing() const { return m_vSpace >= 0 ? m_vSpace : smartSpacing(QStyle::PM_LayoutVerticalSpacing); }
+    int count() const override { return itemList.size(); }
+    QLayoutItem* itemAt(int index) const override { return itemList.value(index); }
+    QLayoutItem* takeAt(int index) override {
+        return (index >= 0 && index < itemList.size()) ? itemList.takeAt(index) : nullptr;
+    }
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return doLayout(QRect(0, 0, width, 0), true); }
+    void setGeometry(const QRect& rect) override {
+        QLayout::setGeometry(rect);
+        doLayout(rect, false);
+    }
+    QSize sizeHint() const override { return minimumSize(); }
+    QSize minimumSize() const override {
+        QSize size;
+        for (const QLayoutItem* item : itemList)
+            size = size.expandedTo(item->minimumSize());
+        const QMargins m = contentsMargins();
+        size += QSize(m.left() + m.right(), m.top() + m.bottom());
+        return size;
+    }
+
+private:
+    int doLayout(const QRect& rect, bool testOnly) const {
+        int left, top, right, bottom;
+        getContentsMargins(&left, &top, &right, &bottom);
+        QRect effectiveRect = rect.adjusted(+left, +top, -right, -bottom);
+        int x = effectiveRect.x(), y = effectiveRect.y(), lineHeight = 0;
+
+        for (QLayoutItem* item : itemList) {
+            int spaceX = horizontalSpacing();
+            int spaceY = verticalSpacing();
+            int nextX = x + item->sizeHint().width() + spaceX;
+            if (nextX - spaceX > effectiveRect.right() && lineHeight > 0) {
+                x = effectiveRect.x();
+                y = y + lineHeight + spaceY;
+                nextX = x + item->sizeHint().width() + spaceX;
+                lineHeight = 0;
+            }
+            if (!testOnly)
+                item->setGeometry(QRect(QPoint(x, y), item->sizeHint()));
+            x = nextX;
+            lineHeight = std::max(lineHeight, item->sizeHint().height());
+        }
+        return y + lineHeight - rect.y() + bottom;
+    }
+    int smartSpacing(QStyle::PixelMetric pm) const {
+        QObject* parent = this->parent();
+        if (!parent) return -1;
+        if (parent->isWidgetType()) {
+            auto* pw = static_cast<QWidget*>(parent);
+            return pw->style()->pixelMetric(pm, nullptr, pw);
+        }
+        return static_cast<QLayout*>(parent)->spacing();
+    }
+    QList<QLayoutItem*> itemList;
+    int m_hSpace, m_vSpace;
+};
 
 inline void exportWidgetToSvg(QWidget* canvas, const QString& default_filename, bool force_light_theme = true) {
     if (!canvas) return;
@@ -622,7 +696,7 @@ public:
 
     QSize sizeHint() const override { return cached_size; }
 
-    QSize minimumSizeHint() const override { return cached_size; }
+    QSize minimumSizeHint() const override { return QSize(80, sizeHint().height()); }
 
 protected:
     struct MathNode {
@@ -1093,8 +1167,19 @@ protected:
 
         QFont f = makeLatexBaseFont(base_pt + 1);
         auto m = measureNode(root_node, f);
-        double y_base = 0.5 * (height() + m.asc - m.desc);
-        drawNode(p, root_node, 8.0, y_base, f);
+
+        p.save();
+        double avail_w = std::max(32.0, width() - 16.0);
+        if (m.w > avail_w && m.w > 1e-6) {
+            double sc = avail_w / m.w;
+            p.translate(8.0, height() * 0.5);
+            p.scale(sc, sc);
+            drawNode(p, root_node, 0.0, 0.5 * (m.asc - m.desc), f);
+        } else {
+            double y_base = 0.5 * (height() + m.asc - m.desc);
+            drawNode(p, root_node, 8.0, y_base, f);
+        }
+        p.restore();
     }
 };
 
@@ -3612,17 +3697,30 @@ inline QPushButton* makeActionBtn(const QString& text, const QString& accent_fg,
     return b;
 }
 
-inline QScrollArea* wrapInLeftScroll(QWidget* left_w, int min_w = 380) {
+inline QScrollArea* wrapInLeftScroll(QWidget* left_w, int min_w = 340) {
     auto* sa = new QScrollArea();
     sa->setWidgetResizable(true);
     sa->setFrameShape(QFrame::NoFrame);
-    sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Allow horizontal scrollbar ONLY if user drags panel narrower than content's natural min width
+    sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     sa->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    sa->setMinimumWidth(min_w);
+    sa->setMinimumWidth(260); // Lets user smoothly drag the divider on half-screen windows
     sa->setStyleSheet("QScrollArea { background: transparent; border: none; }");
-    left_w->setMinimumWidth(min_w - 16);
+    left_w->setMinimumWidth(min_w);
     sa->setWidget(left_w);
     return sa;
+}
+
+inline void configureMainSplitter(QSplitter* splitter, QWidget* left_scroll, QWidget* right_card) {
+    right_card->setMinimumWidth(280);
+    splitter->addWidget(left_scroll);
+    splitter->addWidget(right_card);
+    // CRITICAL: Stop QSplitter from snapping to 100% cards or 100% plot!
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(6);
+    splitter->setStretchFactor(0, 0);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes({430, 650});
 }
 
 // Reusable Editable Poles (×) & Zeros (○) Card with SpinBox Count & Scrollable Re/Im Rows

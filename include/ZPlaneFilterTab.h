@@ -46,10 +46,11 @@ public:
         auto* poly_l = new QVBoxLayout(poly_card);
         poly_l->setContentsMargins(10, 6, 10, 6);
         auto* poly_hdr = new QHBoxLayout();
-        auto* t1 = new QLabel("Digital Filter  H(z) = Kd · Num(z) / Den(z)");
+        auto* t1 = new QLabel("Filter  H(z) = Kd · Num(z) / Den(z)");
         t1->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ASYMP));
-        auto* solve_btn = makeActionBtn("Solve z-Zeros & z-Poles ➔", Theme::ACCENT_PID);
-        poly_hdr->addWidget(t1); poly_hdr->addStretch(); poly_hdr->addWidget(solve_btn);
+        auto* solve_btn = makeActionBtn("Solve Zeros & Poles ➔", Theme::ACCENT_PID);
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        poly_hdr->addWidget(t1, 1); poly_hdr->addWidget(solve_btn);
         poly_l->addLayout(poly_hdr);
 
         auto* pgrid = new QGridLayout();
@@ -62,6 +63,7 @@ public:
         poly_l->addLayout(pgrid);
 
         poly_status_lbl = new QLabel("Enter z-polynomials (e.g. z^2-0.94z+0.33) and press Enter / Solve");
+        poly_status_lbl->setWordWrap(true);
         poly_status_lbl->setStyleSheet("color: #94a3b8; font-size: 10px; border:none;");
         poly_l->addWidget(poly_status_lbl);
 
@@ -95,22 +97,24 @@ public:
         auto* synth_l = new QVBoxLayout(synth_card);
         synth_l->setContentsMargins(10, 6, 10, 6);
         auto* shdr = new QHBoxLayout();
-        auto* st = new QLabel("Filter Calculator:");
+        auto* st = new QLabel("Filter Preset:");
         st->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ASYMP));
         preset_combo = new QComboBox();
+        preset_combo->setMinimumWidth(110);
         preset_combo->addItems({
             "Butterworth LPF (2nd)", "Butterworth HPF (2nd)", "Biquad Band-Pass",
             "Biquad Notch", "Moving Avg FIR (4-Tap)", "Tustin from s-Plane G(s)", "Matched z=e^(sTs) from G(s)"
         });
         preset_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 3px; font-weight: bold; font-size: 11px;").arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
         auto* synth_btn = makeActionBtn("Synthesize H(z)", Theme::ACCENT_PID);
+        synth_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         shdr->addWidget(st); shdr->addWidget(preset_combo, 1); shdr->addWidget(synth_btn);
         synth_l->addLayout(shdr);
 
-        auto* sbot = new QHBoxLayout();
-        cutoff_edit = makeDarkEntry("0.25", 50);
-        kd_edit     = makeDarkEntry(QString::number(model->filter_gain), 60);
-        ts_edit     = makeDarkEntry(QString::number(model->ts), 50);
+        auto* sbot = new FlowLayout(nullptr, 0, 6, 4);
+        cutoff_edit = makeDarkEntry("0.25", 46);
+        kd_edit     = makeDarkEntry(QString::number(model->filter_gain), 52);
+        ts_edit     = makeDarkEntry(QString::number(model->ts), 46);
         auto* snap_uc_btn = makeActionBtn("z = e^(jΩc)", Theme::ACCENT_ZERO);
         auto addInline = [&](const QString& lbl, QWidget* w) {
             auto* l = new QLabel(lbl); l->setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold; border:none;");
@@ -124,7 +128,7 @@ public:
 
         // Test Point z + Cartesian / Polar Switcher
         auto* tp_hdr = new QHBoxLayout();
-        auto* tp_t = new QLabel("Test Point  z  &  Angle Tolerance");
+        auto* tp_t = new QLabel("Test Point z & Tolerance");
         tp_t->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_PID));
         cart_radio  = new QRadioButton("Cartesian"); cart_radio->setChecked(true);
         polar_radio = new QRadioButton("Polar");
@@ -155,6 +159,7 @@ public:
         auto* rt_lbl = new QLabel("z-Domain & Filter Evaluation");
         rt_lbl->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::TEXT_PRIMARY));
         auto* send_btn = makeActionBtn("Send H(z) → Discrete Sim ➔", Theme::ACCENT_PID);
+        send_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
         res_hdr->addWidget(rt_lbl); res_hdr->addStretch(); res_hdr->addWidget(send_btn);
         res_l->addLayout(res_hdr);
 
@@ -180,7 +185,9 @@ public:
             auto* vl = new QVBoxLayout(b);
             vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(t); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
+            tl->setWordWrap(true);
             out = new QLabel("—"); out->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            out->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(out);
             mgrid->addWidget(b, r, c);
         };
@@ -195,30 +202,38 @@ public:
         // Right z-Plane Canvas
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* phdr = new QHBoxLayout();
-        auto* pt = new QLabel("Complex z-Plane & Unit Circle Filter Diagram");
+
+        auto* plot_top_row = new QHBoxLayout();
+        plot_top_row->setContentsMargins(0, 0, 0, 0);
+        auto* pt = new QLabel("Complex z-Plane & Unit Circle");
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
+        auto* fit_b = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        fit_b->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        plot_top_row->addWidget(pt);
+        plot_top_row->addStretch();
+        plot_top_row->addWidget(fit_b);
+        right_l->addLayout(plot_top_row);
+
         auto* chk_uc  = new QCheckBox("Unit Circle |z|=1"); chk_uc->setChecked(true);  chk_uc->setStyleSheet("color: #22d3ee; font-weight: bold;");
         auto* chk_zg  = new QCheckBox("ζ/ωn Grid");         chk_zg->setChecked(true);  chk_zg->setStyleSheet("color: #34d399; font-weight: bold;");
         auto* chk_rl  = new QCheckBox("Root Locus");        chk_rl->setChecked(true);  chk_rl->setStyleSheet("color: #a855f7; font-weight: bold;");
         auto* chk_dep = new QCheckBox("Dep/Arr ∠");         chk_dep->setChecked(true); chk_dep->setStyleSheet("color: #f472b6; font-weight: bold;");
         chk_tp_show   = new QCheckBox("Test Point");        chk_tp_show->setChecked(true); chk_tp_show->setStyleSheet("color: #facc15; font-weight: bold;");
-        auto* fit_b   = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
-        phdr->addWidget(pt); phdr->addStretch();
-        phdr->addWidget(chk_uc); phdr->addWidget(chk_zg);
-        phdr->addWidget(chk_rl); phdr->addWidget(chk_dep);
-        phdr->addWidget(chk_tp_show); phdr->addWidget(fit_b);
-        right_l->addLayout(phdr);
+
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(chk_uc);
+        chk_flow->addWidget(chk_zg);
+        chk_flow->addWidget(chk_rl);
+        chk_flow->addWidget(chk_dep);
+        chk_flow->addWidget(chk_tp_show);
+        right_l->addLayout(chk_flow);
 
         canvas = new ComplexPlaneCanvas(true);
         attachSvgExportMenu(canvas, "z_plane_root_locus.svg");
         attachCanvasZoomShortcuts(this, canvas);
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 380));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &ZPlaneFilterTab::applyPolyNumDen);
