@@ -754,8 +754,10 @@ protected:
                     std::vector<std::pair<QPointF, QPointF>> arrows;
 
                     for (size_t i = 0; i + 1 < br.size(); ++i) {
-                        // Only break across genuine world-space branch jumps, never zoom magnification
-                        if (std::abs(br[i + 1] - br[i]) > max_world_jump) {
+                        // Scale allowed step with distance from origin so far-field asymptotic steps never break
+                        double local_rad = std::max( std::abs(br[i]), std::abs(br[i + 1]) );
+                        double allowed_jump = std::max(max_world_jump, local_rad * 0.45);
+                        if (std::abs(br[i + 1] - br[i]) > allowed_jump) {
                             accum_px = 0.0;
                             next_arrow_at = 42.0;
                             continue;

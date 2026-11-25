@@ -2357,7 +2357,7 @@ inline TFEvalResult evaluateTransferFunction(
 inline std::vector<std::vector<Complex>> computeRootLocusBranches(
     const std::vector<Complex>& poles,
     const std::vector<Complex>& zeros,
-    int num_steps = 360)
+    int num_steps = 400)
 {
     size_t deg = std::max(poles.size(), zeros.size());
     if (deg == 0) return {};
@@ -2387,14 +2387,20 @@ inline std::vector<std::vector<Complex>> computeRootLocusBranches(
     double r_pole = (n_nz_poles > 0) ? std::exp(log_pole_sum / n_nz_poles) : 1.0;
     double r_zero = (n_nz_zeros > 0) ? std::exp(log_zero_sum / n_nz_zeros) : r_pole;
     double k_center = std::pow(r_pole, static_cast<double>(poles.size())) /
-                      std::max(1e-12, std::pow(r_zero, static_cast<double>(zeros.size())));
-    k_center = std::clamp(k_center, 1e-4, 1e8);
+                      std::max(1e-18, std::pow(r_zero, static_cast<double>(zeros.size())));
+    k_center = std::clamp(k_center, 1e-12, 1e24);
+
+    // Scale exponent bounds by |n - m| so asymptotic radius K^(1/|n-m|) reaches > 1000x pole scale
+    int p_diff   = static_cast<int>(poles.size()) - static_cast<int>(zeros.size());
+    int abs_diff = std::max(1, std::abs(p_diff));
+    double exp_min = (p_diff < 0) ? -std::max(5.5, 3.2 * double(abs_diff)) : -5.0;
+    double exp_max = (p_diff > 0) ?  std::max(5.5, 3.2 * double(abs_diff)) :  6.0;
 
     std::vector<double> k_vals;
-    k_vals.reserve(num_steps + 128);
+    k_vals.reserve(num_steps + 64);
     k_vals.push_back(0.0);
     for (int i = 0; i < num_steps; ++i) {
-        double exp_v = -5.2 + 10.4 * double(i) / double(num_steps - 1);
+        double exp_v = exp_min + (exp_max - exp_min) * double(i) / double(num_steps - 1);
         k_vals.push_back(k_center * std::pow(10.0, exp_v));
     }
 
@@ -2458,8 +2464,8 @@ inline std::vector<std::vector<Complex>> computeRootLocusBranches(
         if (depth < 6 && !r1.empty() && r2.size() == deg) {
             bool needs_split = false;
             for (size_t b = 0; b < deg; ++b) {
-                // Subdivide if visible branch segment is too long in the s-plane
-                if (std::abs(r1[b]) < view_bound || std::abs(r2[b]) < view_bound) {
+                // Subdivide inside the curved near-field; skip straight far-field asymptotes
+                if (std::abs(r1[b]) < view_bound && std::abs(r2[b]) < view_bound * 2.0) {
                     if (std::abs(r2[b] - r1[b]) > max_arc_step) {
                         needs_split = true;
                         break;
