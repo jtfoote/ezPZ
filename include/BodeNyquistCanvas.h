@@ -752,7 +752,7 @@ public:
     QPoint press_px;
 
     explicit BodeNyquistCanvas(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(480, 380);
+        setMinimumSize(260, 260);
         setCursor(Qt::CrossCursor);
     }
 
@@ -862,7 +862,8 @@ protected:
 
     void ensureNyquistUserBounds() {
         if (!nyq_user_bounds && freq_res.has_value()) {
-            computeAutoNyquistBounds(freq_res.value(), n_min_r, n_max_r, n_min_i, n_max_i);
+            n_min_r = last_nyq_r0; n_max_r = last_nyq_r1;
+            n_min_i = last_nyq_i0; n_max_i = last_nyq_i1;
             nyq_user_bounds = true;
         }
     }
@@ -1226,7 +1227,8 @@ protected:
         // Enforce 1:1 isotropic aspect ratio for Nyquist Unit Circle
         double span_r = std::max(1e-4, base_r1 - base_r0);
         double span_i = std::max(1e-4, base_i1 - base_i0);
-        double upp = std::max(span_r / ew, span_i / eh);
+        // Lock scale to vertical span once user-zoomed so splitter dragging keeps zoom constant
+        double upp = nyq_user_bounds ? (span_i / eh) : std::max(span_r / ew, span_i / eh);
         double mr = 0.5 * (base_r0 + base_r1), mi = 0.5 * (base_i0 + base_i1);
         double r0 = mr - 0.5 * upp * ew, r1 = mr + 0.5 * upp * ew;
         double i0 = mi - 0.5 * upp * eh, i1 = mi + 0.5 * upp * eh;

@@ -39,20 +39,20 @@ public:
         // 1. Palette & Templates Card
         auto* tools_card = makeCard();
         auto* tl = new QVBoxLayout(tools_card);
-        auto* t_hdr = new QLabel("Block Diagram Builder & Topology Templates");
+        auto* t_hdr = new QLabel("Block Diagram Builder & Templates");
         t_hdr->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         tl->addWidget(t_hdr);
 
-        auto* add_row = new QHBoxLayout();
-        auto* b_blk = makeActionBtn("+ Transfer Block G(s)", Theme::ACCENT_ZERO);
-        auto* b_sum = makeActionBtn("+ Summing Junction Σ", Theme::ACCENT_PID);
-        auto* b_br  = makeActionBtn("+ Branch Point •", Theme::ACCENT_LOCUS);
+        auto* add_row = new FlowLayout(nullptr, 0, 6, 4);
+        auto* b_blk = makeActionBtn("+ Block G(s)", Theme::ACCENT_ZERO);
+        auto* b_sum = makeActionBtn("+ Sum Σ", Theme::ACCENT_PID);
+        auto* b_br  = makeActionBtn("+ Branch •", Theme::ACCENT_LOCUS);
         add_row->addWidget(b_blk); add_row->addWidget(b_sum); add_row->addWidget(b_br);
         tl->addLayout(add_row);
 
-        auto* tmpl_row = new QHBoxLayout();
+        auto* tmpl_row = new FlowLayout(nullptr, 0, 6, 4);
         for (const auto& [lbl, key] : std::vector<std::pair<QString, std::string>>{
-            {"Unity Feedback", "unity"}, {"G1·G2 + H1 Feedback", "cascade"}, {"Inner + Outer Loop", "nested"}, {"Parallel Feedforward", "parallel"}
+            {"Unity Feedback", "unity"}, {"G1·G2 + H1", "cascade"}, {"Inner + Outer Loop", "nested"}, {"Parallel FF", "parallel"}
         }) {
             auto* b = makeActionBtn(lbl, Theme::TEXT_PRIMARY);
             connect(b, &QPushButton::clicked, this, [this, key]() { loadTemplate(key); });
@@ -67,8 +67,9 @@ public:
         auto* ihdr = new QHBoxLayout();
         auto* it = new QLabel("Selected Element Inspector");
         it->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_PID));
-        auto* del_btn = makeActionBtn("Delete Selected ⌫", Theme::ACCENT_POLE);
-        ihdr->addWidget(it); ihdr->addStretch(); ihdr->addWidget(del_btn);
+        auto* del_btn = makeActionBtn("Delete ⌫", Theme::ACCENT_POLE);
+        del_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        ihdr->addWidget(it, 1); ihdr->addWidget(del_btn);
         il->addLayout(ihdr);
 
         auto* igrid = new QGridLayout();
@@ -83,9 +84,9 @@ public:
         igrid->addWidget(l3, 2, 0); igrid->addWidget(den_edit, 2, 1);
         il->addLayout(igrid);
 
-        auto* ibar = new QHBoxLayout();
-        auto* apply_b = makeActionBtn("Apply Block Num(s)/Den(s) ↵", Theme::ACCENT_PID);
-        auto* flip_b  = makeActionBtn("Toggle Selected Wire Sign (±)", Theme::ACCENT_OPEN);
+        auto* ibar = new FlowLayout(nullptr, 0, 6, 4);
+        auto* apply_b = makeActionBtn("Apply Num/Den ↵", Theme::ACCENT_PID);
+        auto* flip_b  = makeActionBtn("Flip Wire Sign (±)", Theme::ACCENT_OPEN);
         ibar->addWidget(apply_b); ibar->addWidget(flip_b);
         il->addLayout(ibar);
         left_l->addWidget(insp_card);
@@ -93,28 +94,31 @@ public:
         // 3. Reduced Equivalent G_eq(s) & T(s) Card + Manual Push
         auto* res_card = makeCard();
         auto* rl = new QVBoxLayout(res_card);
-        auto* rt = new QLabel("Equivalent Reduced Transfer Functions  G_eq(s) & T(s)");
+        auto* rt = new QLabel("Reduced Transfer Functions  G_eq(s) & T(s)");
+        rt->setWordWrap(true);
         rt->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::TEXT_PRIMARY));
         rl->addWidget(rt);
 
         geq_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
         geq_pz_lbl = new QLabel("Poles: — | Zeros: —");
+        geq_pz_lbl->setWordWrap(true);
         geq_pz_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-size: 10px; border:none;");
         rl->addWidget(geq_math_w);
         rl->addWidget(geq_pz_lbl);
 
         ts_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_LOCUS), QColor(Theme::BG_INPUT), 10);
         ts_pz_lbl = new QLabel("Poles: — | Zeros: —");
+        ts_pz_lbl->setWordWrap(true);
         ts_pz_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-size: 10px; border:none;");
         rl->addWidget(ts_math_w);
         rl->addWidget(ts_pz_lbl);
 
-        push_g_btn = makeActionBtn("Manual Push: Export G_eq(s) → Suite Plant (Tabs 1–6) ➔", "#0b0e14", Theme::ACCENT_ZERO);
-        push_t_btn = makeActionBtn("Manual Push: Export Closed-Loop T(s) → Suite Plant (Tabs 1–6) ➔", Theme::TEXT_PRIMARY, Theme::BG_PANEL_ALT);
+        push_g_btn = makeActionBtn("Export G_eq(s) → Suite Plant ➔", "#0b0e14", Theme::ACCENT_ZERO);
+        push_t_btn = makeActionBtn("Export Closed-Loop T(s) → Suite Plant ➔", Theme::TEXT_PRIMARY, Theme::BG_PANEL_ALT);
         rl->addWidget(push_g_btn);
         rl->addWidget(push_t_btn);
 
-        status_lbl = new QLabel("Isolated Workspace: Changes here do NOT overwrite Tabs 1–6 until you click Manual Push.");
+        status_lbl = new QLabel("Isolated Workspace: Changes here do NOT overwrite Tabs 1–6 until you click Export.");
         status_lbl->setWordWrap(true);
         status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::ACCENT_PID));
         rl->addWidget(status_lbl);
@@ -124,22 +128,17 @@ public:
         // Right Canvas
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* chdr = new QHBoxLayout();
-        auto* ct = new QLabel("Interactive Block Diagram Canvas (L-Drag: Move • Shift+Click or R-Click Node A → Node B: Wire)");
+        auto* ct = new QLabel("Interactive Block Diagram Canvas  (L-Drag: Move • Shift+Click / R-Click A → B: Wire)");
+        ct->setWordWrap(true);
         ct->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 12px; border:none;").arg(Theme::TEXT_PRIMARY));
-        chdr->addWidget(ct);
-        right_l->addLayout(chdr);
+        right_l->addWidget(ct);
 
         canvas = new BlockDiagramCanvas();
         canvas->nodes = &nodes;
         canvas->edges = &edges;
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(left_w);
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
-        left_w->setMinimumWidth(465);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(b_blk, &QPushButton::clicked, this, [this]() {
@@ -320,8 +319,8 @@ public:
                     ).arg(Theme::BG_INPUT, Theme::BORDER_INPUT);
                     push_g_btn->setStyleSheet(disabled_style);
                     push_t_btn->setStyleSheet(disabled_style);
-                    push_g_btn->setText("🔒 Export Disabled (Contains Symbolic 'K')");
-                    push_t_btn->setText("🔒 Export Disabled (Contains Symbolic 'K')");
+                    push_g_btn->setText("Export Disabled (Contains Symbolic 'K')");
+                    push_t_btn->setText("Export Disabled (Contains Symbolic 'K')");
                 } else {
                     push_g_btn->setStyleSheet(QString(
                         "QPushButton { background-color: %1; color: #0b0e14; border: 1px solid %2; border-radius: 4px; padding: 5px 10px; font-weight: bold; font-size: 11px; }"
@@ -329,8 +328,8 @@ public:
                     push_t_btn->setStyleSheet(QString(
                         "QPushButton { background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 5px 10px; font-weight: bold; font-size: 11px; }"
                     ).arg(Theme::BG_PANEL_ALT, Theme::TEXT_PRIMARY, Theme::BORDER_INPUT));
-                    push_g_btn->setText("Manual Push: Export G_eq(s) → Suite Plant (Tabs 1–6) ➔");
-                    push_t_btn->setText("Manual Push: Export Closed-Loop T(s) → Suite Plant (Tabs 1–6) ➔");
+                    push_g_btn->setText("Export G_eq(s) → Suite Plant ➔");
+                    push_t_btn->setText("Export Closed-Loop T(s) → Suite Plant ➔");
                 }
             }
         } catch (const std::exception& e) {

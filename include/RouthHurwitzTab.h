@@ -390,11 +390,14 @@ public:
         cl->setContentsMargins(10, 8, 10, 8);
         cl->setSpacing(5);
 
-        auto* t1 = new QLabel("1. Characteristic Equation  1 + K·G(s)H(s) = 0  or  Custom P(s; K) = 0");
+        auto* t1 = new QLabel("1. Characteristic Equation  1 + K·G(s)H(s) = 0  or  P(s; K) = 0");
+        t1->setWordWrap(true);
         t1->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         cl->addWidget(t1);
 
         source_combo = new QComboBox();
+        source_combo->setMinimumWidth(140);
+        source_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         source_combo->addItems({
             "Synced Closed-Loop:  Den(s) + K · Num(s) = 0  (from Plant G(s)H(s))",
             "Synced Active PID Loop:  1 + C_PID(s)G(s)H(s) = 0",
@@ -404,24 +407,28 @@ public:
                                     .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
         cl->addWidget(source_combo);
 
-        auto* p_row = new QHBoxLayout();
+        auto* p_row1 = new QHBoxLayout();
         auto* p_lbl = new QLabel("P(s; K) =");
         p_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border:none;").arg(Theme::ACCENT_PID));
         custom_poly_edit = makeDarkEntry("s^4 + 6s^3 + 21s^2 + (26 + K)s + 6K");
+        p_row1->addWidget(p_lbl);
+        p_row1->addWidget(custom_poly_edit, 1);
+        cl->addLayout(p_row1);
+
+        auto* p_row2 = new QHBoxLayout();
         auto* k_lbl = new QLabel("Eval @ K =");
         k_lbl->setStyleSheet("color: #94a3b8; font-family: Monospace; font-weight: bold; border:none;");
-        k_eval_edit = makeDarkEntry("10.0", 60);
+        k_eval_edit = makeDarkEntry("10.0", 65);
         auto* solve_btn = makeActionBtn("Build Routh Table ➔", "#0b0e14", Theme::ACCENT_PID);
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        p_row2->addWidget(k_lbl);
+        p_row2->addWidget(k_eval_edit);
+        p_row2->addStretch();
+        p_row2->addWidget(solve_btn);
+        cl->addLayout(p_row2);
 
-        p_row->addWidget(p_lbl);
-        p_row->addWidget(custom_poly_edit, 1);
-        p_row->addWidget(k_lbl);
-        p_row->addWidget(k_eval_edit);
-        p_row->addWidget(solve_btn);
-        cl->addLayout(p_row);
-
-        // Quick Textbook Presets Row (Normal, Case 1: Zero in Col 1, Case 2: Row of Zeros)
-        auto* pr_row = new QHBoxLayout();
+        // Quick Textbook Presets Row (Wraps cleanly onto 2 lines when narrow)
+        auto* pr_row = new FlowLayout(nullptr, 0, 6, 4);
         auto* pr_lbl = new QLabel("Presets:");
         pr_lbl->setStyleSheet("color: #64748b; font-size: 10px; font-weight: bold; border:none;");
         pr_row->addWidget(pr_lbl);
@@ -443,7 +450,6 @@ public:
             });
             pr_row->addWidget(b);
         }
-        pr_row->addStretch();
         cl->addLayout(pr_row);
 
         char_eq_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
@@ -458,6 +464,7 @@ public:
 
         auto* t2 = new QLabel("2. Routh-Hurwitz Stability Verdict, Pole Distribution & K-Limits");
         t2->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::TEXT_PRIMARY));
+        t2->setWordWrap(true);
         tl->addWidget(t2);
 
         verdict_banner = new QFrame();
@@ -481,6 +488,7 @@ public:
             vl->setContentsMargins(6, 4, 6, 4);
             auto* l = new QLabel(title); l->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
             out = new QLabel("—"); out->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;").arg(col));
+            l->setWordWrap(true); out->setWordWrap(true);
             vl->addWidget(l); vl->addWidget(out);
             sgrid->addWidget(b, r, c);
         };
@@ -508,14 +516,14 @@ public:
         auto* right_card = makeCard();
         auto* rl = new QVBoxLayout(right_card);
         rl->setContentsMargins(12, 10, 12, 10);
-        auto* rt = new QLabel("Routh-Hurwitz Array  (First Column Highlighted for Sign-Change Inspection)");
+        auto* rt = new QLabel("Routh-Hurwitz Array  (Col 1 Highlighted for Sign Changes)");
+        rt->setWordWrap(true);
         rt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
         rl->addWidget(rt);
 
         auto* scroll = new QScrollArea();
         scroll->setWidgetResizable(true);
         scroll->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 6px;").arg(Theme::BG_PLOT, Theme::BORDER_PANEL));
-        table_container = new QWidget();
         table_container = new QWidget();
         routh_grid = new QGridLayout(table_container);
         routh_grid->setAlignment(Qt::AlignTop | Qt::AlignLeft);
@@ -525,10 +533,7 @@ public:
         scroll->setWidget(table_container);
         rl->addWidget(scroll, 1);
 
-        splitter->addWidget(wrapInLeftScroll(left_w, 380));
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         connect(source_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
             if (!updating_ui) evaluateCurrent();

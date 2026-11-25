@@ -45,30 +45,41 @@ public:
         poly_l->setSpacing(4);
 
         auto* poly_hdr = new QHBoxLayout();
-        poly_title_lbl = new QLabel("1. Plant Transfer Function  G(s) = K · Num(s) / Den(s)");
+        poly_title_lbl = new QLabel("1. Plant  G(s) = K · Num(s) / Den(s)");
         poly_title_lbl->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         auto* solve_btn = makeActionBtn("Solve Zeros & Poles ➔", Theme::ACCENT_PID);
-        poly_hdr->addWidget(poly_title_lbl);
-        poly_hdr->addStretch();
+        solve_btn->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        poly_hdr->addWidget(poly_title_lbl, 1);
         poly_hdr->addWidget(solve_btn);
         poly_l->addLayout(poly_hdr);
 
         auto* pgrid = new QGridLayout();
+        pgrid->setHorizontalSpacing(6);
+        pgrid->setVerticalSpacing(4);
         num_lbl = new QLabel("Num(s):");
         num_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         num_edit = makeDarkEntry();
+        num_edit->setMinimumWidth(50);
 
         den_lbl = new QLabel("Den(s):");
         den_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border:none;").arg(Theme::ACCENT_POLE));
         den_edit = makeDarkEntry();
+        den_edit->setMinimumWidth(50);
 
         gain_lbl = new QLabel("Gain K:");
         gain_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-weight: bold; border:none;").arg(Theme::TEXT_MUTED));
-        gain_edit = makeDarkEntry("1.0", 50);
+        gain_edit = makeDarkEntry("1.0", 55);
+
+        poly_status_lbl = new QLabel("Enter polynomials (e.g. s^2+2s+2) and press Enter / Solve");
+        poly_status_lbl->setWordWrap(true);
+        poly_status_lbl->setStyleSheet(QString("color: %1; font-size: 10px; border:none;").arg(Theme::TEXT_MUTED));
 
         pgrid->addWidget(num_lbl,  0, 0); pgrid->addWidget(num_edit,  0, 1);
         pgrid->addWidget(den_lbl,  0, 2); pgrid->addWidget(den_edit,  0, 3);
-        pgrid->addWidget(gain_lbl, 0, 4); pgrid->addWidget(gain_edit, 0, 5);
+        pgrid->addWidget(gain_lbl, 1, 0); pgrid->addWidget(gain_edit, 1, 1);
+        pgrid->addWidget(poly_status_lbl, 1, 2, 1, 2);
+        pgrid->setColumnStretch(1, 1);
+        pgrid->setColumnStretch(3, 1);
         poly_l->addLayout(pgrid);
 
         poly_status_lbl = new QLabel("Enter polynomials (e.g. s^2+2s+2 or (s+1)(s+3)) and press Enter / Solve");
@@ -112,6 +123,8 @@ public:
             "Continuous Closed-Loop System T(jω) = Y(jω)/R(jω)  [Bandwidth & Mr]",
             "Discrete Digital Filter Frequency Response H(e^{jωTs})"
         });
+        domain_combo->setMinimumWidth(140);
+        domain_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         domain_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 3px; font-weight: bold; font-size: 11px;")
                                     .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
         sl->addWidget(domain_combo);
@@ -172,6 +185,7 @@ public:
             auto* l = new QLabel(title);
             l->setStyleSheet(QString("color: %1; font-size: 9px; font-weight: bold; border:none;").arg(Theme::TEXT_MUTED));
             out = new QLabel("—");
+            l->setWordWrap(true); out->setWordWrap(true);
             out->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
             vl->addWidget(l);
             vl->addWidget(out);
@@ -188,10 +202,17 @@ public:
         // Right Plot Panel (Bode / Nyquist Switcher + Asymptotes, Mirror, Margin & Ghost Toggles)
         auto* right_card = makeCard();
         auto* rl = new QVBoxLayout(right_card);
-        auto* phdr = new QHBoxLayout();
-        phdr->setSpacing(8);
+
+        auto* plot_top_row = new QHBoxLayout();
+        plot_top_row->setContentsMargins(0, 0, 0, 0);
         auto* pt = new QLabel("Frequency-Domain Bode & Nyquist");
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 13px; border:none;").arg(Theme::TEXT_PRIMARY));
+        auto* fit_b = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
+        fit_b->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+        plot_top_row->addWidget(pt);
+        plot_top_row->addStretch();
+        plot_top_row->addWidget(fit_b);
+        rl->addLayout(plot_top_row);
 
         auto* rb_bode = new QRadioButton("Bode Plot"); rb_bode->setChecked(true);
         auto* rb_nyq  = new QRadioButton("Nyquist Polar");
@@ -209,25 +230,21 @@ public:
         chk_marg->setStyleSheet(QString("QCheckBox { color: %1; font-weight: bold; font-size: 11px; border:none; }").arg(Theme::ACCENT_PID));
         chk_ghost->setStyleSheet(QString("QCheckBox { color: %1; font-weight: bold; font-size: 11px; border:none; }").arg(Theme::TEXT_SECONDARY));
 
-        auto* fit_b = makeActionBtn("Fit View", Theme::TEXT_PRIMARY, Theme::BG_PANEL);
-
-        phdr->addWidget(pt);
-        phdr->addStretch();
-        phdr->addWidget(rb_bode);
-        phdr->addWidget(rb_nyq);
-        phdr->addWidget(chk_asymp);
-        phdr->addWidget(chk_mirror);
-        phdr->addWidget(chk_marg);
-        phdr->addWidget(chk_ghost);
-        phdr->addWidget(fit_b);
-        rl->addLayout(phdr);
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(rb_bode);
+        chk_flow->addWidget(rb_nyq);
+        chk_flow->addWidget(chk_asymp);
+        chk_flow->addWidget(chk_mirror);
+        chk_flow->addWidget(chk_marg);
+        chk_flow->addWidget(chk_ghost);
+        rl->addLayout(chk_flow);
 
         canvas = new BodeNyquistCanvas();
         attachSvgExportMenu(canvas, "ezpz_bode_nyquist.svg");
         attachCanvasZoomShortcuts(this, canvas);
         rl->addWidget(canvas, 1);
 
-        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 410), right_card);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 365), right_card);
 
         // Connections
         connect(solve_btn, &QPushButton::clicked, this, &FrequencyResponseTab::applyPolyNumDen);
@@ -316,7 +333,7 @@ public:
         bool is_z = (domain_combo->currentIndex() == 2);
         if (!is_z && model->comp_enabled_s) {
             include_pid_chk->setEnabled(false);
-            include_pid_chk->setText("Gc(s) Compensator Active in Loop  (Uncheck Enable Gc(s) above to use PID)");
+            include_pid_chk->setText("Gc(s) Active in Loop (Uncheck Gc(s) to use PID)");
         } else if (!is_z) {
             include_pid_chk->setEnabled(true);
             include_pid_chk->setText("Include Active Tab 2 PID Controller C(s) in Frequency Loop");

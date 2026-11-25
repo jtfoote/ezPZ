@@ -423,7 +423,7 @@ public:
     std::function<void(double, double)> onCursorsChanged;
 
     explicit DualSignalCanvas(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(540, 480);
+        setMinimumSize(280, 320);
         setMouseTracking(true);
     }
 
@@ -577,7 +577,8 @@ private:
             .arg(QString::number(ch2_div, 'g', 3))
             .arg(QString::number(data.ch2_offset, 'g', 3));
         p.setPen(QColor(Theme::TEXT_PRIMARY));
-        p.drawText(QRectF(r.left(), r.top() - 20, r.width(), 18), Qt::AlignLeft | Qt::AlignVCenter, scope_hdr);
+        p.drawText(QRectF(r.left(), r.top() - 20, r.width(), 18), Qt::AlignLeft | Qt::AlignVCenter,
+           p.fontMetrics().elidedText(scope_hdr, Qt::ElideRight, int(r.width())));
 
         p.setPen(QColor(Theme::TEXT_SECONDARY));
         p.drawText(QRectF(r.left(), r.bottom() + 16, r.width(), 16), Qt::AlignCenter,
@@ -800,7 +801,8 @@ private:
 
         p.setFont(QFont("Monospace", 8, QFont::Bold));
         p.setPen(QColor(Theme::TEXT_PRIMARY));
-        p.drawText(QRectF(r.left(), r.top() - 20, r.width(), 18), Qt::AlignLeft | Qt::AlignVCenter, sa_hdr);
+        p.drawText(QRectF(r.left(), r.top() - 20, r.width(), 18), Qt::AlignLeft | Qt::AlignVCenter,
+           p.fontMetrics().elidedText(sa_hdr, Qt::ElideRight, int(r.width())));
 
         p.setPen(QColor(Theme::TEXT_SECONDARY));
         QString x_lbl = data.is_discrete
@@ -993,10 +995,6 @@ public:
         auto* splitter = new QSplitter(Qt::Horizontal, this);
         root_layout->addWidget(splitter);
 
-        auto* scroll = new QScrollArea();
-        scroll->setWidgetResizable(true);
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         auto* left_w = new QWidget();
         auto* left_v = new QVBoxLayout(left_w);
         left_v->setContentsMargins(0, 0, 6, 0);
@@ -1010,7 +1008,7 @@ public:
         sig_l->setContentsMargins(10, 7, 10, 7);
         sig_l->setSpacing(4);
 
-        auto* hdr1 = new QHBoxLayout();
+        auto* hdr1 = new FlowLayout(nullptr, 0, 8, 4);
         auto* t1 = new QLabel("1. Input Signal  x(t) / x[n]");
         t1->setStyleSheet(QString("color: %1; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
         cont_radio = new QRadioButton("Continuous x(t)"); cont_radio->setChecked(true);
@@ -1019,7 +1017,7 @@ public:
             rb->setStyleSheet(QString("QRadioButton { color: %1; font-weight: bold; font-size: 11px; border:none; }").arg(Theme::TEXT_PRIMARY));
         }
         auto* eval_btn = makeActionBtn("Plot Signal ➔", Theme::ACCENT_PID);
-        hdr1->addWidget(t1); hdr1->addStretch(); hdr1->addWidget(cont_radio); hdr1->addWidget(disc_radio); hdr1->addWidget(eval_btn);
+        hdr1->addWidget(t1); hdr1->addWidget(cont_radio); hdr1->addWidget(disc_radio); hdr1->addWidget(eval_btn);
         sig_l->addLayout(hdr1);
 
         auto* eq_grid = new QGridLayout();
@@ -1039,6 +1037,8 @@ public:
         });
         preset_combo->setStyleSheet(QString("background-color: %1; color: %2; padding: 3px; font-weight: bold; font-size: 10px;")
                                     .arg(Theme::BG_INPUT, Theme::TEXT_PRIMARY));
+        preset_combo->setMinimumWidth(120);
+        preset_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 
         auto* eq_lbl = new QLabel("x(t) =");
         eq_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 11px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
@@ -1051,6 +1051,7 @@ public:
 
         auto* fn_hint = new QLabel("Use symbols A, B, C, D to auto-spawn sliders • Functions: u(t), delta(t), rect(t), tri(t), sinc(t), ramp(t)");
         fn_hint->setStyleSheet("color: #64748b; font-size: 9px; border:none;");
+        fn_hint->setWordWrap(true);
         sig_l->addWidget(fn_hint);
 
         x_math_w = new MathFormulaWidget("", QColor(Theme::ACCENT_ZERO), QColor(Theme::BG_INPUT), 10);
@@ -1093,7 +1094,7 @@ public:
 
             row.slider = new QSlider(Qt::Horizontal);
             row.slider->setRange(0, 1000);
-            row.slider->setMinimumWidth(110);
+            row.slider->setMinimumWidth(55);
             int init_pos = static_cast<int>(std::round(((defs[i].val - defs[i].min_v) / (defs[i].max_v - defs[i].min_v)) * 1000.0));
             row.slider->setValue(std::clamp(init_pos, 0, 1000));
 
@@ -1136,7 +1137,7 @@ public:
         nonlin_chk->setStyleSheet(QString("QCheckBox { color: %1; font-weight: bold; font-size: 11px; border:none; }").arg(Theme::ACCENT_PID));
         nl_l->addWidget(nonlin_chk);
 
-        auto* nl_mode_row = new QHBoxLayout();
+        auto* nl_mode_row = new FlowLayout(nullptr, 0, 8, 3);
         poly_nl_radio   = new QRadioButton("Polynomial: a₀ + a₁x + a₂x² + a₃x³"); poly_nl_radio->setChecked(true);
         custom_nl_radio = new QRadioButton("Custom Nonlinear Model g(x)");
         for (auto* rb : {poly_nl_radio, custom_nl_radio}) {
@@ -1177,7 +1178,7 @@ public:
 
             row.slider = new QSlider(Qt::Horizontal);
             row.slider->setRange(0, 1000);
-            row.slider->setMinimumWidth(100);
+            row.slider->setMinimumWidth(55);
             int init_pos = static_cast<int>(std::round(((nl_defs[i].val - nl_defs[i].min_v) / (nl_defs[i].max_v - nl_defs[i].min_v)) * 1000.0));
             row.slider->setValue(std::clamp(init_pos, 0, 1000));
 
@@ -1220,6 +1221,7 @@ public:
             "3-Bit Quantizer (Staircase):  round(x * 4) / 4"
         });
         nonlin_preset_combo->setStyleSheet(preset_combo->styleSheet());
+        nonlin_preset_combo->setMinimumWidth(120); nonlin_preset_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         c_nl_row->addWidget(new QLabel("Model:"));
         c_nl_row->addWidget(nonlin_preset_combo, 1);
         c_nl_v->addLayout(c_nl_row);
@@ -1241,11 +1243,11 @@ public:
         inst_l->setSpacing(5);
 
         // --- OSCILLOSCOPE SUB-HEADER ---
-        auto* scope_hdr = new QHBoxLayout();
+        auto* scope_hdr = new FlowLayout(nullptr, 0, 8, 4);
         auto* scope_title = new QLabel("4A. Oscilloscope Controls  (10 Horiz × 8 Vert Divs)");
         scope_title->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_ZERO));
         auto* auto_scale_btn = makeActionBtn("Auto-Scale Scope", Theme::ACCENT_ZERO, Theme::BG_INPUT);
-        scope_hdr->addWidget(scope_title); scope_hdr->addStretch(); scope_hdr->addWidget(auto_scale_btn);
+        scope_hdr->addWidget(scope_title); scope_hdr->addWidget(auto_scale_btn);
         inst_l->addLayout(scope_hdr);
 
         auto* scope_grid = new QGridLayout();
@@ -1272,7 +1274,7 @@ public:
         addScopeCell(2, 0, "CH2(y) Mag/Div:", ch2_div_edit,  Theme::ACCENT_PID);
         addScopeCell(2, 1, "CH2(y) Offset:",  ch2_off_edit,  Theme::ACCENT_PID);
         n_pts_edit = makeDarkEntry("1024", 52);
-        addScopeCell(0, 2, "Samples N:", n_pts_edit, Theme::TEXT_PRIMARY);
+        addScopeCell(3, 0, "Samples N:", n_pts_edit, Theme::TEXT_PRIMARY);
         inst_l->addLayout(scope_grid);
 
         // Divider line
@@ -1282,13 +1284,13 @@ public:
         inst_l->addWidget(sep);
 
         // --- SPECTRUM ANALYZER SUB-HEADER ---
-        auto* sa_hdr = new QHBoxLayout();
+        auto* sa_hdr = new FlowLayout(nullptr, 0, 8, 4);
         auto* sa_title = new QLabel("4B. Spectrum Analyzer  (Center / Span / Max & Auto RBW Δf)");
         sa_title->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 11px; border:none;").arg(Theme::ACCENT_LOCUS));
         window_combo = new QComboBox();
         window_combo->addItems({"Hann Window", "Hamming Window", "Rectangular (Exact)"});
         window_combo->setStyleSheet(preset_combo->styleSheet());
-        sa_hdr->addWidget(sa_title); sa_hdr->addStretch(); sa_hdr->addWidget(window_combo);
+        sa_hdr->addWidget(sa_title); sa_hdr->addWidget(window_combo);
         inst_l->addLayout(sa_hdr);
 
         auto* sa_grid = new QGridLayout();
@@ -1325,7 +1327,7 @@ public:
         sep2->setStyleSheet(QString("color: %1;").arg(Theme::BORDER_PANEL));
         inst_l->addWidget(sep2);
 
-        auto* samp_hdr = new QHBoxLayout();
+        auto* samp_hdr = new FlowLayout(nullptr, 0, 8, 4);
         samp_sim_chk = new QCheckBox("4C. Sample & Reconstruct Continuous Signal  (ADC f_s & Aliasing Explorer)");
         samp_sim_chk->setChecked(false);
         samp_sim_chk->setStyleSheet(QString("QCheckBox { color: %1; font-weight: bold; font-size: 11px; border:none; }").arg(Theme::ACCENT_OPEN));
@@ -1336,7 +1338,8 @@ public:
             "First-Order Hold (Linear Interp)"
         });
         recon_mode_combo->setStyleSheet(preset_combo->styleSheet());
-        samp_hdr->addWidget(samp_sim_chk); samp_hdr->addStretch(); samp_hdr->addWidget(recon_mode_combo);
+        recon_mode_combo->setMinimumWidth(120); recon_mode_combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        samp_hdr->addWidget(samp_sim_chk); samp_hdr->addWidget(recon_mode_combo);
         inst_l->addLayout(samp_hdr);
 
         auto* fs_row = new QHBoxLayout();
@@ -1374,6 +1377,7 @@ public:
             auto* vl = new QVBoxLayout(b); vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(title); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
             out = new QLabel("—"); out->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
+            tl->setWordWrap(true); out->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(out);
             mgrid->addWidget(b, r, c);
         };
@@ -1385,16 +1389,16 @@ public:
         left_v->addWidget(inst_card);
         left_v->addStretch();
 
-        scroll->setWidget(left_w);
-
         // =====================================================================
         // Right Dual-Stacked Canvas Panel
         // =====================================================================
         auto* right_card = makeCard();
         auto* right_l = new QVBoxLayout(right_card);
-        auto* phdr = new QHBoxLayout();
-        auto* pt = new QLabel("Oscilloscope & Spectrum Analyzer  (Click Top: Time Cursor • Click Bottom: Freq Cursor)");
+
+        auto* pt = new QLabel("Oscilloscope & Spectrum Analyzer  (Click Top: Time • Click Bottom: Freq)");
+        pt->setWordWrap(true);
         pt->setStyleSheet(QString("color: %1; font-weight: bold; font-size: 12px; border:none;").arg(Theme::TEXT_PRIMARY));
+        right_l->addWidget(pt);
 
         auto* chk_in_ov = new QCheckBox("CH1 Input Overlay"); chk_in_ov->setChecked(true); chk_in_ov->setStyleSheet("color: #38bdf8; font-weight: bold;");
         auto* chk_eo    = new QCheckBox("Even/Odd Parts");    chk_eo->setStyleSheet("color: #f59e0b; font-weight: bold;");
@@ -1402,19 +1406,19 @@ public:
         auto* chk_db    = new QCheckBox("Spectrum in dB");    chk_db->setStyleSheet("color: #a855f7; font-weight: bold;");
         auto* chk_ph    = new QCheckBox("Phase ∠Y(f)");       chk_ph->setStyleSheet("color: #ec4899; font-weight: bold;");
 
-        phdr->addWidget(pt); phdr->addStretch();
-        phdr->addWidget(chk_in_ov); phdr->addWidget(chk_eo); phdr->addWidget(chk_inset); phdr->addWidget(chk_db); phdr->addWidget(chk_ph);
-        right_l->addLayout(phdr);
+        auto* chk_flow = new FlowLayout(nullptr, 0, 10, 4);
+        chk_flow->addWidget(chk_in_ov);
+        chk_flow->addWidget(chk_eo);
+        chk_flow->addWidget(chk_inset);
+        chk_flow->addWidget(chk_db);
+        chk_flow->addWidget(chk_ph);
+        right_l->addLayout(chk_flow);
 
         canvas = new DualSignalCanvas();
         attachSvgExportMenu(canvas, "signal_oscilloscope_spectrum.svg");
         right_l->addWidget(canvas, 1);
 
-        splitter->addWidget(scroll);
-        splitter->addWidget(right_card);
-        splitter->setStretchFactor(0, 0);
-        splitter->setStretchFactor(1, 1);
-        scroll->setMinimumWidth(510);
+        configureMainSplitter(splitter, wrapInLeftScroll(left_w, 375), right_card);
 
         // =====================================================================
         // Wire Up Sliders, Scope Controls & Bidirectional Center/Span/Max SA

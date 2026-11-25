@@ -314,8 +314,10 @@ public:
     QSize sizeHint() const override { return minimumSize(); }
     QSize minimumSize() const override {
         QSize size;
-        for (const QLayoutItem* item : itemList)
+        for (const QLayoutItem* item : itemList) {
+            if (item->isEmpty()) continue;
             size = size.expandedTo(item->minimumSize());
+        }
         const QMargins m = contentsMargins();
         size += QSize(m.left() + m.right(), m.top() + m.bottom());
         return size;
@@ -329,6 +331,7 @@ private:
         int x = effectiveRect.x(), y = effectiveRect.y(), lineHeight = 0;
 
         for (QLayoutItem* item : itemList) {
+            if (item->isEmpty()) continue;
             int spaceX = horizontalSpacing();
             int spaceY = verticalSpacing();
             int nextX = x + item->sizeHint().width() + spaceX;
