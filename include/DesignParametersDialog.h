@@ -1274,7 +1274,8 @@ private:
 
         auto loop_poles = model->uncompensatedLoopPolesS();
         auto loop_zeros = model->uncompensatedLoopZerosS();
-        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, sd, 1.0);
+        double loop_gain = model->uncompensatedLoopGainS();
+        auto ev = evaluateTransferFunction(loop_poles, loop_zeros, sd, loop_gain);
         double def_deg = computeAngleDeficiency(ev.angle_deg); // signed in [-180, 180]
 
         comp_def_lbl->setText(QString(
@@ -1506,7 +1507,7 @@ private:
             if (res.has_pole) comp_poles.push_back(Complex(-res.p_c, 0.0));
         }
 
-        auto ev_comp = evaluateTransferFunction(comp_poles, comp_zeros, sd, 1.0);
+        auto ev_comp = evaluateTransferFunction(comp_poles, comp_zeros, sd, loop_gain);
         res.k_c = std::isfinite(ev_comp.rl_gain_k) ? ev_comp.rl_gain_k : 1.0;
 
         if (res.comp_type == "PD") {

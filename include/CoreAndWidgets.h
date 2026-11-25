@@ -2357,13 +2357,15 @@ inline TFEvalResult evaluateTransferFunction(
 inline std::vector<std::vector<Complex>> computeRootLocusBranches(
     const std::vector<Complex>& poles,
     const std::vector<Complex>& zeros,
-    int num_steps = 400)
+    int num_steps = 400,
+    double loop_sign = 1.0)
 {
     size_t deg = std::max(poles.size(), zeros.size());
     if (deg == 0) return {};
 
+    double sgn = (loop_sign < 0.0) ? -1.0 : 1.0;
     Poly den_p = polyFromRoots(poles);
-    Poly num_p = polyFromRoots(zeros);
+    Poly num_p = polyScale(polyFromRoots(zeros), Complex(sgn, 0.0));
     Poly den_pad(deg + 1, Complex(0.0, 0.0));
     Poly num_pad(deg + 1, Complex(0.0, 0.0));
     for (size_t i = 0; i < den_p.size(); ++i) den_pad[deg + 1 - den_p.size() + i] = den_p[i];
@@ -2553,6 +2555,12 @@ struct SimulationResult {
     std::optional<double> zeta, omega_n, omega_d, ol_zeta, ol_omega_n;
     Complex y_steady = {1.0, 0.0};
     double steady_state_error = 0.0;
+    double steady_state_error_signed = 0.0;
+    bool has_sine_ss = false;
+    double sine_ss_gain = 0.0;
+    double sine_ss_gain_db = 0.0;
+    double sine_ss_amp = 0.0;
+    double sine_ss_phase_deg = 0.0;
     double relative_error_frac = 0.0;
     double relative_error_pct = 0.0;
     std::optional<double> rise_time, settling_time, settling_time_5pct, overshoot_pct;
@@ -2859,9 +2867,27 @@ public:
         if (res.stability_state == "STABLE" && cfg.signal_type == "Step") {
             if (std::abs(act_den.back()) > 1e-12) res.y_steady = Complex(cfg.input_magnitude, 0.0) * (act_num.back() / act_den.back());
             else res.y_steady = res.y_primary.back();
+            res.steady_state_error_signed = cfg.input_magnitude - res.y_steady.real();
             res.steady_state_error = std::abs(cfg.input_magnitude - res.y_steady);
+        } else if (res.stability_state == "STABLE" && cfg.signal_type == "Sine") {
+            Complex jw(0.0, std::max(0.0, cfg.sine_freq_rad));
+            Complex d_jw = polyVal(act_den, jw);
+            if (std::abs(d_jw) > 1e-14) {
+                Complex t_jw = polyVal(act_num, jw) / d_jw;
+                res.has_sine_ss = true;
+                res.sine_ss_gain = std::abs(t_jw);
+                res.sine_ss_gain_db = (res.sine_ss_gain > 1e-15)
+                    ? (20.0 * std::log10(res.sine_ss_gain))
+                    : -std::numeric_limits<double>::infinity();
+                res.sine_ss_amp = std::abs(cfg.input_magnitude) * res.sine_ss_gain;
+                res.sine_ss_phase_deg = std::arg(t_jw) * (180.0 / PI);
+            }
+            res.y_steady = Complex(0.0, 0.0); // Zero-mean sinusoid
+            res.steady_state_error_signed = res.r.back() - res.y_primary.back().real();
+            res.steady_state_error = std::abs(res.r.back() - res.y_primary.back());
         } else {
             res.y_steady = res.y_primary.back();
+            res.steady_state_error_signed = res.r.back() - res.y_primary.back().real();
             res.steady_state_error = std::abs(res.r.back() - res.y_primary.back());
         }
 
@@ -3047,6 +3073,7 @@ struct DiscreteSimulationConfig {
     std::vector<Complex> hz_fb_zeros;
     double hz_fb_gain = 1.0;
     double input_magnitude = 1.0;
+    double sine_freq_rad = 2.0;
     double ts = 0.05;
     bool pid_enabled = true;
     double kp = 1.0, ki = 0.5, kd = 0.02;
@@ -3337,6 +3364,7 @@ public:
     std::vector<Complex> zeros = {{-8.0, 0.0}};
     double plant_gain = 1.0;
     double input_magnitude = 1.0;
+    double sine_freq_rad = 2.0;
     Complex test_point = {-2.0, 2.0};
     double rl_tol_deg = 0.5;
 
@@ -3473,6 +3501,7 @@ public:
         zeros = {{-8.0, 0.0}};
         plant_gain = 1.0;
         input_magnitude = 1.0;
+        sine_freq_rad = 2.0;
         test_point = {-2.0, 2.0};
         rl_tol_deg = 0.5;
         pid_enabled = true;
@@ -3511,6 +3540,7 @@ public:
         s.setValue("s/zeros", serializeComplexVec(zeros));
         s.setValue("s/plant_gain", plant_gain);
         s.setValue("s/input_mag", input_magnitude);
+        s.setValue("s/sine_freq_rad", sine_freq_rad);
         s.setValue("s/tp_re", test_point.real());
         s.setValue("s/tp_im", test_point.imag());
         s.setValue("s/rl_tol", rl_tol_deg);
@@ -3573,6 +3603,7 @@ public:
         zeros = deserializeComplexVec(s.value("s/zeros").toString());
         plant_gain = s.value("s/plant_gain", 1.0).toDouble();
         input_magnitude = s.value("s/input_mag", 1.0).toDouble();
+        sine_freq_rad = s.value("s/sine_freq_rad", 2.0).toDouble();
         test_point = Complex(s.value("s/tp_re", -2.0).toDouble(), s.value("s/tp_im", 2.0).toDouble());
         rl_tol_deg = s.value("s/rl_tol", 0.5).toDouble();
         pid_enabled = s.value("s/pid_enabled", true).toBool();
@@ -3668,6 +3699,12 @@ public:
         auto out = z_zeros;
         if (!unity_feedback_z) out.insert(out.end(), hz_fb_zeros.begin(), hz_fb_zeros.end());
         return out;
+    }
+    double uncompensatedLoopGainS() const {
+        return plant_gain * (unity_feedback_s ? 1.0 : h_gain);
+    }
+    double effectiveLoopGainS() const {
+        return uncompensatedLoopGainS() * (comp_enabled_s ? c_gain : 1.0);
     }
 };
 

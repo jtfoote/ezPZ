@@ -16,7 +16,9 @@ public:
     QSlider *kp_slider, *ki_slider, *kd_slider;
     QCheckBox *enable_pid_chk;
     QComboBox *loop_mode_combo, *sig_combo;
-    QLineEdit *mag_edit, *gain_edit, *cursor_edit, *tmax_edit, *tol_edit;
+    QLineEdit *mag_edit, *sine_w_edit, *gain_edit, *cursor_edit, *tmax_edit, *tol_edit;
+    QLabel *sine_w_lbl = nullptr;
+    QLabel *m_card1_title = nullptr, *m_card4_title = nullptr;
     QLabel *poly_status_lbl;
 
     QFrame* status_banner;
@@ -177,23 +179,29 @@ public:
         sig_combo = new QComboBox();
         sig_combo->addItems({"Step", "Impulse", "Ramp", "Sine"});
         sig_combo->setStyleSheet(loop_mode_combo->styleSheet());
-        mag_edit    = makeDarkEntry("1.0", 40);
-        gain_edit   = makeDarkEntry("1.0", 40);
-        cursor_edit = makeDarkEntry("2.5", 40);
-        tmax_edit   = makeDarkEntry("10.0", 40);
-        tol_edit    = makeDarkEntry("2.0", 40);
+        mag_edit    = makeDarkEntry("1.0", 38);
+        sine_w_edit = makeDarkEntry("2.0", 44);
+        sine_w_edit->setToolTip("Sinusoidal input frequency ω in rad/s: r(t) = M·sin(ω·t)");
+        gain_edit   = makeDarkEntry("1.0", 38);
+        cursor_edit = makeDarkEntry("2.5", 38);
+        tmax_edit   = makeDarkEntry("10.0", 38);
+        tol_edit    = makeDarkEntry("2.0", 36);
 
-        auto addLabeled = [&](int col, const QString& txt, QWidget* w) {
+        auto addLabeled = [&](int col, const QString& txt, QWidget* w, QLabel** out_lbl = nullptr) {
             auto* l = new QLabel(txt); l->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
+            if (out_lbl) *out_lbl = l;
             sim_row->addWidget(l, 0, col);
             sim_row->addWidget(w, 1, col);
         };
         addLabeled(0, "Input r(t)", sig_combo);
         addLabeled(1, "Amp M", mag_edit);
-        addLabeled(2, "Gain K", gain_edit);
-        addLabeled(3, "Cursor t", cursor_edit);
-        addLabeled(4, "T_max (s)", tmax_edit);
-        addLabeled(5, "Tol (±%)", tol_edit);
+        addLabeled(2, "ω (r/s)", sine_w_edit, &sine_w_lbl);
+        addLabeled(3, "Gain K", gain_edit);
+        addLabeled(4, "Cursor t", cursor_edit);
+        addLabeled(5, "T_max (s)", tmax_edit);
+        addLabeled(6, "Tol (±%)", tol_edit);
+        sine_w_lbl->setVisible(false);
+        sine_w_edit->setVisible(false);
         pid_l->addLayout(sim_row);
         left_v->addWidget(pid_card);
 
@@ -215,22 +223,23 @@ public:
         tel_l->addWidget(status_banner);
 
         auto* mgrid = new QGridLayout();
-        auto makeTelCard = [&](int r, int c, const QString& title, QLabel*& val_lbl) {
+        auto makeTelCard = [&](int r, int c, const QString& title, QLabel*& val_lbl, QLabel** title_out = nullptr) {
             auto* b = makeCard();
             b->setStyleSheet(QString("background-color: %1; border: 1px solid %2; border-radius: 4px; padding: 4px;").arg(Theme::BG_INPUT, Theme::BORDER_INPUT));
             auto* vl = new QVBoxLayout(b);
             vl->setContentsMargins(6, 3, 6, 3);
             auto* tl = new QLabel(title); tl->setStyleSheet("color: #94a3b8; font-size: 9px; font-weight: bold; border:none;");
             tl->setWordWrap(true);
+            if (title_out) *title_out = tl;
             val_lbl = new QLabel("—"); val_lbl->setStyleSheet(QString("color: %1; font-family: Monospace; font-size: 10px; font-weight: bold; border:none;").arg(Theme::ACCENT_ZERO));
             val_lbl->setWordWrap(true);
             vl->addWidget(tl); vl->addWidget(val_lbl);
             mgrid->addWidget(b, r, c);
         };
-        makeTelCard(0, 0, "OVERSHOOT, S.S.E. & RELATIVE ERROR", m_card1);
+        makeTelCard(0, 0, "OVERSHOOT, S.S.E. & RELATIVE ERROR", m_card1, &m_card1_title);
         makeTelCard(0, 1, "RESPONSE TIMES (Tr, Tp & Ts)", m_card2);
         makeTelCard(1, 0, "DAMPING ζ & FREQUENCIES (ωn, ωd, σd)", m_card3);
-        makeTelCard(1, 1, "STEADY-STATE y_ss, TYPE & Kp,pos / Kv", m_card4);
+        makeTelCard(1, 1, "STEADY-STATE y_ss, TYPE & Kp,pos / Kv", m_card4, &m_card4_title);
         makeTelCard(2, 0, "CLOSED-LOOP & OPEN-LOOP POLES", m_card5);
         makeTelCard(2, 1, "CURSOR INSPECTION @ t", m_card6);
         tel_l->addLayout(mgrid);
@@ -398,13 +407,18 @@ public:
             dlg->show();
         });
 
-        for (auto* ed : {mag_edit, tmax_edit, gain_edit, tol_edit}) {
+        for (auto* ed : {mag_edit, sine_w_edit, tmax_edit, gain_edit, tol_edit}) {
             connect(ed, &QLineEdit::editingFinished, this, [this]() { runSimulation(true); });
         }
         connect(cursor_edit, &QLineEdit::editingFinished, this, [this]() {
             updateCursorOnly(parseNumericInput(cursor_edit->text().toStdString(), 0.0));
         });
-        connect(sig_combo, &QComboBox::currentTextChanged, this, [this]() { runSimulation(true); });
+        connect(sig_combo, &QComboBox::currentTextChanged, this, [this](const QString& txt) {
+            bool is_sine = (txt == "Sine");
+            if (sine_w_lbl)  sine_w_lbl->setVisible(is_sine);
+            if (sine_w_edit) sine_w_edit->setVisible(is_sine);
+            runSimulation(true);
+        });
         connect(chk_ol, &QCheckBox::toggled, this, [this](bool v) { canvas->show_ol = v; canvas->update(); });
         connect(chk_u,  &QCheckBox::toggled, this, [this](bool v) { canvas->show_u  = v; canvas->update(); });
 
@@ -500,6 +514,7 @@ public:
         num_edit->setText(QString::fromStdString(formatScaledPlantNum()));
         den_edit->setText(QString::fromStdString(formatPolynomialFromRoots(model->poles, "s")));
         mag_edit->setText(QString::number(model->input_magnitude, 'g', 4));
+        sine_w_edit->setText(QString::number(model->sine_freq_rad, 'g', 5));
         enable_pid_chk->setChecked(model->pid_enabled);
         kp_edit->setText(QString::number(model->kp, 'g', 4));
         ki_edit->setText(QString::number(model->ki, 'g', 4));
@@ -606,6 +621,7 @@ public:
         cfg.ki = parseNumericInput(ki_edit->text().toStdString(), 0.0);
         cfg.kd = parseNumericInput(kd_edit->text().toStdString(), 0.0);
         cfg.signal_type = sig_combo->currentText().toStdString();
+        cfg.sine_freq_rad = std::max(1e-4, std::abs(parseNumericInput(sine_w_edit->text().toStdString(), 2.0)));
         cfg.cursor_time = parseNumericInput(cursor_edit->text().toStdString(), 2.5);
         cfg.t_max = std::max(1e-6, parseNumericInput(tmax_edit->text().toStdString(), 10.0));
         cfg.settle_tol_pct = std::max(0.1, parseNumericInput(tol_edit->text().toStdString(), 2.0));
@@ -620,6 +636,7 @@ public:
             model->ki = cfg.ki;
             model->kd = cfg.kd;
             model->notify("pid_sim");
+            model->sine_freq_rad = cfg.sine_freq_rad;
         }
 
         bool is_stable = (res.stability_state == "STABLE");
@@ -643,12 +660,30 @@ public:
             .arg(QString::fromStdString(res.damping_regime)));
         status_right_lbl->setText(QString("max Re(s) = %1").arg(QString::fromStdString(PRECISION.fmt(res.max_real_pole, true))));
 
-        m_card1->setText(QString("%OS: %1% (Nise: %2%) | Peak: %3\nS.S.E.: %4 | Rel. Err: %5%")
-            .arg(QString::fromStdString(PRECISION.fmt(res.overshoot_pct)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.theo_os_pct)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.peak_value)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.steady_state_error)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.relative_error_pct))));
+        if (cfg.signal_type == "Sine" && res.has_sine_ss) {
+            if (m_card1_title) m_card1_title->setText("SINE STEADY-STATE AMP & GAIN @ ω");
+            m_card1->setText(QString("A_ss: %1 (Peak: %2) | ω: %3 r/s\n|T(jω)|: %4 (%5 dB) | ∠T: %6°")
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_amp)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.peak_value)))
+                .arg(QString::fromStdString(PRECISION.fmt(cfg.sine_freq_rad)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_gain)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_gain_db)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_phase_deg, true))));
+        } else {
+            if (m_card1_title) m_card1_title->setText("OVERSHOOT, S.S.E. & RELATIVE ERROR");
+            QString sse_str = (cfg.signal_type == "Step" && res.stability_state == "STABLE")
+                ? QString::fromStdString(PRECISION.fmt(res.steady_state_error_signed))
+                : "—";
+            QString rel_str = (cfg.signal_type == "Step" && res.stability_state == "STABLE")
+                ? (QString::fromStdString(PRECISION.fmt((res.steady_state_error_signed / std::max(std::abs(cfg.input_magnitude), 1e-12)) * 100.0)) + "%")
+                : "—";
+            m_card1->setText(QString("%OS: %1% (Nise: %2%) | Peak: %3\nS.S.E.: %4 | Rel. Err: %5")
+                .arg(QString::fromStdString(PRECISION.fmt(res.overshoot_pct)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.theo_os_pct)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.peak_value)))
+                .arg(sse_str)
+                .arg(rel_str));
+        }
 
         auto fmtSec = [](const std::optional<double>& v, const std::string& fallback = "—") -> QString {
             if (!v.has_value() || !std::isfinite(*v)) return QString::fromStdString(fallback);
@@ -670,13 +705,29 @@ public:
             .arg(QString::fromStdString(PRECISION.fmt(res.sigma_d)))
             .arg(QString::fromStdString(PRECISION.fmt(res.time_constant_tau))));
 
-        m_card4->setText(QString("y_ss: %1 (M=%2) | Type: %3\nKp,pos: %4 | Kv: %5 | T(0): %6")
-            .arg(QString::fromStdString(PRECISION.fmtComplex(res.y_steady)))
-            .arg(QString::fromStdString(PRECISION.fmt(cfg.input_magnitude)))
-            .arg(res.system_type)
-            .arg(QString::fromStdString(PRECISION.fmt(res.kp_pos)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.kv_vel)))
-            .arg(QString::fromStdString(PRECISION.fmt(res.dc_gain_cl))));
+        if (cfg.signal_type == "Sine" && res.has_sine_ss) {
+            if (m_card4_title) m_card4_title->setText("SINUSOIDAL y_ss(t), TYPE & Kp,pos / Kv");
+            m_card4->setText(QString("y_ss(t): %1·sin(%2t%3°) | Type: %4\nKp,pos: %5 | Kv: %6 | T(0): %7")
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_amp)))
+                .arg(QString::fromStdString(PRECISION.fmt(cfg.sine_freq_rad)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.sine_ss_phase_deg, true)))
+                .arg(res.system_type)
+                .arg(QString::fromStdString(PRECISION.fmt(res.kp_pos)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.kv_vel)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.dc_gain_cl))));
+        } else {
+            if (m_card4_title) m_card4_title->setText("STEADY-STATE y_ss, TYPE & Kp,pos / Kv");
+            QString yss_str = (cfg.signal_type == "Step" && res.stability_state == "STABLE")
+                ? QString::fromStdString(PRECISION.fmtComplex(res.y_steady))
+                : (cfg.signal_type == "Impulse" && res.stability_state == "STABLE" ? "0" : "—");
+            m_card4->setText(QString("y_ss: %1 (M=%2) | Type: %3\nKp,pos: %4 | Kv: %5 | T(0): %6")
+                .arg(yss_str)
+                .arg(QString::fromStdString(PRECISION.fmt(cfg.input_magnitude)))
+                .arg(res.system_type)
+                .arg(QString::fromStdString(PRECISION.fmt(res.kp_pos)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.kv_vel)))
+                .arg(QString::fromStdString(PRECISION.fmt(res.dc_gain_cl))));
+        }
 
         std::string cl_p_s, ol_p_s;
         for (size_t i = 0; i < std::min<size_t>(3, res.cl_poles.size()); ++i) cl_p_s += (i ? ", " : "") + PRECISION.fmtComplex(res.cl_poles[i]);

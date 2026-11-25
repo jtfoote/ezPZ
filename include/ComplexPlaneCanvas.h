@@ -301,6 +301,8 @@ public:
     std::vector<Complex> cached_ghost_poles;
     std::vector<Complex> cached_ghost_zeros;
     std::vector<std::vector<Complex>> cached_ghost_branches;
+    double ghost_loop_gain_factor = 1.0;
+    double cached_ghost_loop_sign = 1.0;
     bool show_asymp = true;
     bool has_asymp_centroid = false;
     Complex asymp_centroid = {0.0, 0.0};
@@ -311,6 +313,7 @@ public:
     std::vector<Complex> zeros;
     std::vector<Complex> cached_poles;
     std::vector<Complex> cached_zeros;
+    double cached_loop_sign = 1.0;
     std::vector<Complex> comp_poles;
     std::vector<Complex> comp_zeros;
     std::vector<std::vector<Complex>> cached_branches;
@@ -687,8 +690,9 @@ protected:
             QPointF c_px = toPx({sigma_a, 0.0});
             double rad = farViewRadiusFrom({sigma_a, 0.0});
             p.setPen(QPen(QColor(Theme::ACCENT_ASYMP), 1.3, Qt::DashLine));
+            bool comp_locus = (loop_gain_factor < 0.0);
             for (int k = 0; k < std::abs(diff); ++k) {
-                double ang = (2.0 * k + 1.0) * PI / std::abs(diff);
+                double ang = (comp_locus ? (2.0 * k * PI) : ((2.0 * k + 1.0) * PI)) / std::abs(diff);
                 QPointF far_px = toPx({sigma_a + rad * std::cos(ang), rad * std::sin(ang)});
                 drawClippedLine(p, c_px, far_px);
             }
@@ -696,10 +700,12 @@ protected:
 
         // Uncompensated "Ghost" Root Locus Overlay (Dashed Reference Curve + Faint Poles/Zeros)
         if (show_ghost_locus && !ghost_poles.empty()) {
-            if (ghost_poles != cached_ghost_poles || ghost_zeros != cached_ghost_zeros) {
+            double ghost_sign = (ghost_loop_gain_factor < 0.0) ? -1.0 : 1.0;
+            if (ghost_poles != cached_ghost_poles || ghost_zeros != cached_ghost_zeros || ghost_sign != cached_ghost_loop_sign) {
                 cached_ghost_poles = ghost_poles;
                 cached_ghost_zeros = ghost_zeros;
-                cached_ghost_branches = computeRootLocusBranches(ghost_poles, ghost_zeros);
+                cached_ghost_loop_sign = ghost_sign;
+                cached_ghost_branches = computeRootLocusBranches(ghost_poles, ghost_zeros, 400, ghost_sign);
             }
             QColor ghost_col(148, 163, 184, 120);
             p.setPen(QPen(ghost_col, 1.8, Qt::DashLine));
@@ -729,11 +735,14 @@ protected:
         // Root Locus Branches + Directional Arrows (➤)
         if (show_locus) {
             // Update cached Root Locus branches whenever poles or zeros change
-            if (poles != cached_poles || zeros != cached_zeros) {
+            double cur_loop_sign = (loop_gain_factor < 0.0) ? -1.0 : 1.0;
+            if (poles != cached_poles || zeros != cached_zeros || cur_loop_sign != cached_loop_sign) {
                 cached_poles = poles;
                 cached_zeros = zeros;
-                cached_branches = poles.empty() ? std::vector<std::vector<Complex>>{}
-                                                : computeRootLocusBranches(poles, zeros);
+                cached_loop_sign = cur_loop_sign;
+                cached_branches = (poles.empty() && zeros.empty())
+                    ? std::vector<std::vector<Complex>>{}
+                    : computeRootLocusBranches(poles, zeros, 400, cur_loop_sign);
             }
 
             // Root Locus Branches + Directional Arrows (➤)
@@ -803,10 +812,14 @@ protected:
         // =====================================================================
         current_intersections.clear();
         if (!is_z_plane) {
-            if (poles != cached_poles || zeros != cached_zeros) {
+            double cur_loop_sign = (loop_gain_factor < 0.0) ? -1.0 : 1.0;
+            if (poles != cached_poles || zeros != cached_zeros || cur_loop_sign != cached_loop_sign) {
                 cached_poles = poles;
                 cached_zeros = zeros;
-                cached_branches = computeRootLocusBranches(poles, zeros);
+                cached_loop_sign = cur_loop_sign;
+                cached_branches = (poles.empty() && zeros.empty())
+                    ? std::vector<std::vector<Complex>>{}
+                    : computeRootLocusBranches(poles, zeros, 400, cur_loop_sign);
             }
             const auto& branches = cached_branches;
 
@@ -1438,11 +1451,10 @@ protected:
                     Complex d = poles[k] - zi;
                     if (std::abs(d) >= 1e-5) sum_z_deg += std::arg(d) * (180.0 / PI);
                 }
-                // double theta_dep = wrapDeg((180.0 + sum_z_deg - sum_p_deg) / std::max(1, mult));
-                // At the end of // 1. Compute Angles of Departure for Complex Poles:
                 int q = std::max(1, mult);
+                double base_deg = (loop_gain_factor < 0.0) ? 0.0 : 180.0;
                 for (int m = 0; m < q; ++m) {
-                    double theta_dep = wrapDeg((180.0 * (2 * m + 1) + sum_z_deg - sum_p_deg) / q);
+                    double theta_dep = wrapDeg((base_deg + 360.0 * m + sum_z_deg - sum_p_deg) / q);
                     dep_arr_list.push_back({poles[k], theta_dep, true});
                 }
             }
@@ -1468,8 +1480,9 @@ protected:
                     else sum_z_deg += std::arg(d) * (180.0 / PI);
                 }
                 int q = std::max(1, mult);
+                double base_deg = (loop_gain_factor < 0.0) ? 0.0 : 180.0;
                 for (int m = 0; m < q; ++m) {
-                    double theta_arr = wrapDeg((180.0 * (2 * m + 1) - sum_z_deg + sum_p_deg) / q);
+                    double theta_arr = wrapDeg((base_deg + 360.0 * m - sum_z_deg + sum_p_deg) / q);
                     dep_arr_list.push_back({zeros[k], theta_arr, false});
                 }
             }
