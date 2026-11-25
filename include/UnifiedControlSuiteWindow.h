@@ -157,6 +157,7 @@ public:
                 } else if (cur == 7 && freq_tab && freq_tab->domain_combo->currentIndex() != 2) {
                     model.poles = freq_tab->poles_card->getValues();
                     model.zeros = freq_tab->zeros_card->getValues();
+                    if (freq_tab->comp_card) freq_tab->comp_card->syncToModelS(&model);
                     freq_tab->fb_bar->syncToModelS(&model);
                 }
                 refreshAllTabs();
@@ -278,6 +279,7 @@ public:
             if (freq_tab->domain_combo->currentIndex() != 2) {
                 model.poles = freq_tab->poles_card->getValues();
                 model.zeros = freq_tab->zeros_card->getValues();
+                if (freq_tab->comp_card) freq_tab->comp_card->syncToModelS(&model);
                 freq_tab->fb_bar->syncToModelS(&model);
             } else {
                 model.z_poles = freq_tab->poles_card->getValues();
